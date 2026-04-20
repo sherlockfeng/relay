@@ -2,19 +2,82 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import type {
-  Platform,
-  SessionStatus,
-  StoredSummary,
-  Tag,
-  TrackedSession,
-} from '../types/index.js';
 
-export const DEFAULT_DB_PATH = join(homedir(), '.ai-chat-digest', 'data.db');
+export const DEFAULT_DB_PATH = join(homedir(), '.relay', 'data.db');
 
-let singleton: ChatDigestDB | undefined;
+let singleton: AgentForgeDB | undefined;
 
-function parseJson<T>(raw: string | null, fallback: T): T {
+export interface Campaign {
+  id: string;
+  projectPath: string;
+  title: string;
+  brief?: string;
+  status: 'active' | 'completed';
+  startedAt: string;
+  completedAt?: string;
+  summary?: string;
+}
+
+export interface Cycle {
+  id: string;
+  campaignId: string;
+  cycleNum: number;
+  status: 'pending' | 'product' | 'dev' | 'test' | 'completed';
+  productBrief?: string;
+  screenshots?: Screenshot[];
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface Screenshot {
+  filePath: string;
+  description: string;
+  capturedAt: string;
+}
+
+export interface Task {
+  id: string;
+  cycleId: string;
+  role: 'dev' | 'test';
+  title: string;
+  description?: string;
+  acceptance?: string[];
+  e2eScenarios?: string[];
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  result?: string;
+  docAuditToken?: string;
+  comments?: string[];
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  systemPrompt: string;
+  docPath?: string;
+  isBuiltin: boolean;
+  createdAt: string;
+}
+
+export interface KnowledgeChunk {
+  id: string;
+  roleId: string;
+  sourceFile?: string;
+  chunkText: string;
+  embedding?: Float32Array;
+  createdAt: string;
+}
+
+export interface DocAuditEntry {
+  token: string;
+  taskId?: string;
+  filePath: string;
+  contentHash: string;
+  createdAt: string;
+}
+
+function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   if (raw == null || raw === '') return fallback;
   try {
     return JSON.parse(raw) as T;
@@ -23,84 +86,62 @@ function parseJson<T>(raw: string | null, fallback: T): T {
   }
 }
 
-function rowToStoredSummary(
-  row: Record<string, unknown>,
-  tagNames: string[],
-): StoredSummary {
+function rowToCampaign(row: Record<string, unknown>): Campaign {
   return {
     id: String(row.id),
-    sessionId: String(row.session_id),
+    projectPath: String(row.project_path),
     title: String(row.title),
-    topics: parseJson<string[]>(row.topics as string | null, []),
-    tags: tagNames,
-    contextProvided: {
-      internalTools: parseJson<string[]>(row.context_tools as string | null, []),
-      internalDefinitions: parseJson<string[]>(row.context_defs as string | null, []),
-      externalResources: parseJson<string[]>(
-        (row.context_external as string | null) ?? null,
-        [],
-      ),
-    },
-    discussionProcess: parseJson<string[]>(
-      row.discussion_process as string | null,
-      [],
-    ),
-    problemsDiscovered: parseJson<string[]>(row.problems as string | null, []),
-    decidedSolutions: parseJson<string[]>(row.solutions as string | null, []),
-    domainKnowledge: parseJson<StoredSummary['domainKnowledge']>(
-      row.domain_knowledge as string | null,
-      {},
-    ),
-    actionItems:
-      row.action_items == null || row.action_items === ''
-        ? undefined
-        : parseJson<string[]>(row.action_items as string, []),
-    rawSummary: String(row.raw_summary ?? ''),
-    createdAt: String(row.created_at),
-    modelUsed: String(row.model_used ?? ''),
+    brief: row.brief ? String(row.brief) : undefined,
+    status: row.status as Campaign['status'],
+    startedAt: String(row.started_at),
+    completedAt: row.completed_at ? String(row.completed_at) : undefined,
+    summary: row.summary ? String(row.summary) : undefined,
   };
 }
 
-function rowToSession(row: Record<string, unknown>): TrackedSession {
+function rowToCycle(row: Record<string, unknown>): Cycle {
   return {
     id: String(row.id),
-    platform: row.platform as Platform,
-    projectPath: row.project_path ? String(row.project_path) : undefined,
-    gitBranch: row.git_branch ? String(row.git_branch) : undefined,
-    transcriptPath: String(row.transcript_path),
-    status: row.status as SessionStatus,
-    messageCount: Number(row.message_count ?? 0),
-    firstMessage: row.first_message ? String(row.first_message) : undefined,
-    startedAt: String(row.started_at),
-    lastActiveAt: row.last_active_at ? String(row.last_active_at) : undefined,
+    campaignId: String(row.campaign_id),
+    cycleNum: Number(row.cycle_num),
+    status: row.status as Cycle['status'],
+    productBrief: row.product_brief ? String(row.product_brief) : undefined,
+    screenshots: parseJson<Screenshot[]>(row.screenshots as string, []),
+    startedAt: row.started_at ? String(row.started_at) : undefined,
     completedAt: row.completed_at ? String(row.completed_at) : undefined,
-    summarized: Boolean(row.summarized),
   };
 }
 
-export interface SessionListFilters {
-  status?: SessionStatus;
-  platform?: Platform;
+function rowToTask(row: Record<string, unknown>): Task {
+  return {
+    id: String(row.id),
+    cycleId: String(row.cycle_id),
+    role: row.role as Task['role'],
+    title: String(row.title),
+    description: row.description ? String(row.description) : undefined,
+    acceptance: parseJson<string[]>(row.acceptance as string, []),
+    e2eScenarios: parseJson<string[]>(row.e2e_scenarios as string, []),
+    status: row.status as Task['status'],
+    result: row.result ? String(row.result) : undefined,
+    docAuditToken: row.doc_audit_token ? String(row.doc_audit_token) : undefined,
+    comments: parseJson<string[]>(row.comments as string, []),
+    createdAt: String(row.created_at),
+    completedAt: row.completed_at ? String(row.completed_at) : undefined,
+  };
 }
 
-export interface SummaryListFilters {
-  tags?: string[];
-  platform?: Platform;
-  dateFrom?: string;
-  dateTo?: string;
+function rowToRole(row: Record<string, unknown>): Role {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    systemPrompt: String(row.system_prompt),
+    docPath: row.doc_path ? String(row.doc_path) : undefined,
+    isBuiltin: Boolean(row.is_builtin),
+    createdAt: String(row.created_at),
+  };
 }
 
-export interface SessionStatusExtra {
-  lastActiveAt?: string;
-  completedAt?: string;
-  messageCount?: number;
-  firstMessage?: string;
-  projectPath?: string;
-  gitBranch?: string;
-  transcriptPath?: string;
-}
-
-export class ChatDigestDB {
+export class AgentForgeDB {
   readonly sqlite: Database.Database;
 
   constructor(dbPath: string = DEFAULT_DB_PATH) {
@@ -112,397 +153,314 @@ export class ChatDigestDB {
 
   init(): void {
     this.sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        id              TEXT PRIMARY KEY,
-        platform        TEXT NOT NULL,
-        project_path    TEXT,
-        git_branch      TEXT,
-        transcript_path TEXT NOT NULL,
-        status          TEXT DEFAULT 'active',
-        message_count   INTEGER DEFAULT 0,
-        first_message   TEXT,
-        started_at      TEXT NOT NULL,
-        last_active_at  TEXT,
-        completed_at    TEXT,
-        summarized      INTEGER DEFAULT 0
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id           TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        title        TEXT NOT NULL,
+        brief        TEXT,
+        status       TEXT DEFAULT 'active',
+        started_at   TEXT NOT NULL,
+        completed_at TEXT,
+        summary      TEXT
       );
 
-      CREATE TABLE IF NOT EXISTS summaries (
-        id                  TEXT PRIMARY KEY,
-        session_id          TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        title               TEXT NOT NULL,
-        topics              TEXT,
-        context_tools       TEXT,
-        context_defs        TEXT,
-        context_external    TEXT,
-        discussion_process  TEXT,
-        problems            TEXT,
-        solutions           TEXT,
-        domain_knowledge    TEXT,
-        action_items        TEXT,
-        raw_summary         TEXT,
-        created_at          TEXT NOT NULL,
-        model_used          TEXT
+      CREATE TABLE IF NOT EXISTS cycles (
+        id             TEXT PRIMARY KEY,
+        campaign_id    TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        cycle_num      INTEGER NOT NULL,
+        status         TEXT DEFAULT 'pending',
+        product_brief  TEXT,
+        screenshots    TEXT,
+        started_at     TEXT,
+        completed_at   TEXT
       );
 
-      CREATE TABLE IF NOT EXISTS tags (
-        id    INTEGER PRIMARY KEY AUTOINCREMENT,
-        name  TEXT UNIQUE NOT NULL,
-        color TEXT
+      CREATE TABLE IF NOT EXISTS tasks (
+        id               TEXT PRIMARY KEY,
+        cycle_id         TEXT NOT NULL REFERENCES cycles(id) ON DELETE CASCADE,
+        role             TEXT NOT NULL,
+        title            TEXT NOT NULL,
+        description      TEXT,
+        acceptance       TEXT,
+        e2e_scenarios    TEXT,
+        status           TEXT DEFAULT 'pending',
+        result           TEXT,
+        doc_audit_token  TEXT,
+        comments         TEXT,
+        created_at       TEXT NOT NULL,
+        completed_at     TEXT
       );
 
-      CREATE TABLE IF NOT EXISTS session_tags (
-        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        tag_id     INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-        PRIMARY KEY (session_id, tag_id)
+      CREATE TABLE IF NOT EXISTS roles (
+        id            TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        system_prompt TEXT NOT NULL,
+        doc_path      TEXT,
+        is_builtin    INTEGER DEFAULT 0,
+        created_at    TEXT NOT NULL
       );
 
-      CREATE INDEX IF NOT EXISTS idx_summaries_session_id ON summaries(session_id);
-      CREATE INDEX IF NOT EXISTS idx_session_tags_tag_id ON session_tags(tag_id);
-    `);
-
-    this.sqlite.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS summaries_fts USING fts5(
-        title,
-        topics,
-        problems,
-        solutions,
-        raw_summary,
-        content='summaries',
-        content_rowid='rowid'
+      CREATE TABLE IF NOT EXISTS knowledge_chunks (
+        id          TEXT PRIMARY KEY,
+        role_id     TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        source_file TEXT,
+        chunk_text  TEXT NOT NULL,
+        embedding   BLOB,
+        created_at  TEXT NOT NULL
       );
-    `);
 
-    this.sqlite.exec(`
-      CREATE TRIGGER IF NOT EXISTS summaries_ai AFTER INSERT ON summaries BEGIN
-        INSERT INTO summaries_fts(rowid, title, topics, problems, solutions, raw_summary)
-        VALUES (
-          new.rowid,
-          new.title,
-          new.topics,
-          new.problems,
-          new.solutions,
-          new.raw_summary
-        );
-      END;
+      CREATE TABLE IF NOT EXISTS doc_audit_log (
+        token        TEXT PRIMARY KEY,
+        task_id      TEXT,
+        file_path    TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        created_at   TEXT NOT NULL
+      );
 
-      CREATE TRIGGER IF NOT EXISTS summaries_ad AFTER DELETE ON summaries BEGIN
-        INSERT INTO summaries_fts(summaries_fts, rowid, title, topics, problems, solutions, raw_summary)
-        VALUES('delete', old.rowid, old.title, old.topics, old.problems, old.solutions, old.raw_summary);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS summaries_au AFTER UPDATE ON summaries BEGIN
-        INSERT INTO summaries_fts(summaries_fts, rowid, title, topics, problems, solutions, raw_summary)
-        VALUES('delete', old.rowid, old.title, old.topics, old.problems, old.solutions, old.raw_summary);
-        INSERT INTO summaries_fts(rowid, title, topics, problems, solutions, raw_summary)
-        VALUES (
-          new.rowid,
-          new.title,
-          new.topics,
-          new.problems,
-          new.solutions,
-          new.raw_summary
-        );
-      END;
+      CREATE INDEX IF NOT EXISTS idx_cycles_campaign ON cycles(campaign_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_cycle ON tasks(cycle_id);
+      CREATE INDEX IF NOT EXISTS idx_tasks_role ON tasks(role, status);
+      CREATE INDEX IF NOT EXISTS idx_chunks_role ON knowledge_chunks(role_id);
     `);
   }
 
-  upsertSession(session: TrackedSession): void {
-    const stmt = this.sqlite.prepare(`
-      INSERT INTO sessions (
-        id, platform, project_path, git_branch, transcript_path, status,
-        message_count, first_message, started_at, last_active_at, completed_at, summarized
-      ) VALUES (
-        @id, @platform, @project_path, @git_branch, @transcript_path, @status,
-        @message_count, @first_message, @started_at, @last_active_at, @completed_at, @summarized
-      )
-      ON CONFLICT(id) DO UPDATE SET
-        platform = excluded.platform,
-        project_path = excluded.project_path,
-        git_branch = excluded.git_branch,
-        transcript_path = excluded.transcript_path,
-        status = excluded.status,
-        message_count = excluded.message_count,
-        first_message = COALESCE(excluded.first_message, first_message),
-        started_at = excluded.started_at,
-        last_active_at = excluded.last_active_at,
-        completed_at = excluded.completed_at,
-        summarized = excluded.summarized
-    `);
-    stmt.run({
-      id: session.id,
-      platform: session.platform,
-      project_path: session.projectPath ?? null,
-      git_branch: session.gitBranch ?? null,
-      transcript_path: session.transcriptPath,
-      status: session.status,
-      message_count: session.messageCount,
-      first_message: session.firstMessage ?? null,
-      started_at: session.startedAt,
-      last_active_at: session.lastActiveAt ?? null,
-      completed_at: session.completedAt ?? null,
-      summarized: session.summarized ? 1 : 0,
+  // ── Campaigns ──────────────────────────────────────────────────────────────
+
+  insertCampaign(c: Campaign): void {
+    this.sqlite.prepare(`
+      INSERT INTO campaigns (id, project_path, title, brief, status, started_at, completed_at, summary)
+      VALUES (@id, @project_path, @title, @brief, @status, @started_at, @completed_at, @summary)
+    `).run({
+      id: c.id,
+      project_path: c.projectPath,
+      title: c.title,
+      brief: c.brief ?? null,
+      status: c.status,
+      started_at: c.startedAt,
+      completed_at: c.completedAt ?? null,
+      summary: c.summary ?? null,
     });
   }
 
-  getSession(id: string): TrackedSession | undefined {
-    const row = this.sqlite
-      .prepare(`SELECT * FROM sessions WHERE id = ?`)
-      .get(id) as Record<string, unknown> | undefined;
-    return row ? rowToSession(row) : undefined;
+  getCampaign(id: string): Campaign | undefined {
+    const row = this.sqlite.prepare(`SELECT * FROM campaigns WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    return row ? rowToCampaign(row) : undefined;
   }
 
-  listSessions(filters?: SessionListFilters): TrackedSession[] {
-    const clauses: string[] = [];
+  listCampaigns(): Campaign[] {
+    const rows = this.sqlite.prepare(`SELECT * FROM campaigns ORDER BY started_at DESC`).all() as Record<string, unknown>[];
+    return rows.map(rowToCampaign);
+  }
+
+  updateCampaign(id: string, patch: Partial<Pick<Campaign, 'status' | 'completedAt' | 'summary'>>): void {
+    const sets: string[] = [];
     const params: unknown[] = [];
-    if (filters?.status) {
-      clauses.push('status = ?');
-      params.push(filters.status);
-    }
-    if (filters?.platform) {
-      clauses.push('platform = ?');
-      params.push(filters.platform);
-    }
-    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const rows = this.sqlite
-      .prepare(`SELECT * FROM sessions ${where} ORDER BY started_at DESC`)
-      .all(...params) as Record<string, unknown>[];
-    return rows.map(rowToSession);
-  }
-
-  updateSessionStatus(
-    id: string,
-    status: SessionStatus,
-    extra?: SessionStatusExtra,
-  ): void {
-    const sets = ['status = ?'];
-    const params: unknown[] = [status];
-    if (extra?.lastActiveAt !== undefined) {
-      sets.push('last_active_at = ?');
-      params.push(extra.lastActiveAt);
-    }
-    if (extra?.completedAt !== undefined) {
-      sets.push('completed_at = ?');
-      params.push(extra.completedAt);
-    }
-    if (extra?.messageCount !== undefined) {
-      sets.push('message_count = ?');
-      params.push(extra.messageCount);
-    }
-    if (extra?.firstMessage !== undefined) {
-      sets.push('first_message = ?');
-      params.push(extra.firstMessage);
-    }
-    if (extra?.projectPath !== undefined) {
-      sets.push('project_path = ?');
-      params.push(extra.projectPath);
-    }
-    if (extra?.gitBranch !== undefined) {
-      sets.push('git_branch = ?');
-      params.push(extra.gitBranch);
-    }
-    if (extra?.transcriptPath !== undefined) {
-      sets.push('transcript_path = ?');
-      params.push(extra.transcriptPath);
-    }
+    if (patch.status !== undefined) { sets.push('status = ?'); params.push(patch.status); }
+    if (patch.completedAt !== undefined) { sets.push('completed_at = ?'); params.push(patch.completedAt); }
+    if (patch.summary !== undefined) { sets.push('summary = ?'); params.push(patch.summary); }
+    if (sets.length === 0) return;
     params.push(id);
-    this.sqlite
-      .prepare(`UPDATE sessions SET ${sets.join(', ')} WHERE id = ?`)
-      .run(...params);
+    this.sqlite.prepare(`UPDATE campaigns SET ${sets.join(', ')} WHERE id = ?`).run(...params);
   }
 
-  markSummarized(sessionId: string): void {
-    this.sqlite
-      .prepare(`UPDATE sessions SET summarized = 1 WHERE id = ?`)
-      .run(sessionId);
-  }
+  // ── Cycles ─────────────────────────────────────────────────────────────────
 
-  private getSessionTagNames(sessionId: string): string[] {
-    const rows = this.sqlite
-      .prepare(
-        `SELECT t.name FROM session_tags st
-         JOIN tags t ON t.id = st.tag_id
-         WHERE st.session_id = ?
-         ORDER BY t.name`,
-      )
-      .all(sessionId) as { name: string }[];
-    return rows.map((r) => r.name);
-  }
-
-  insertSummary(summary: StoredSummary): void {
-    const insert = this.sqlite.prepare(`
-      INSERT INTO summaries (
-        id, session_id, title, topics, context_tools, context_defs, context_external,
-        discussion_process, problems, solutions, domain_knowledge, action_items,
-        raw_summary, created_at, model_used
-      ) VALUES (
-        @id, @session_id, @title, @topics, @context_tools, @context_defs, @context_external,
-        @discussion_process, @problems, @solutions, @domain_knowledge, @action_items,
-        @raw_summary, @created_at, @model_used
-      )
-    `);
-    insert.run({
-      id: summary.id,
-      session_id: summary.sessionId,
-      title: summary.title,
-      topics: JSON.stringify(summary.topics),
-      context_tools: JSON.stringify(summary.contextProvided.internalTools),
-      context_defs: JSON.stringify(summary.contextProvided.internalDefinitions),
-      context_external: JSON.stringify(summary.contextProvided.externalResources),
-      discussion_process: JSON.stringify(summary.discussionProcess),
-      problems: JSON.stringify(summary.problemsDiscovered),
-      solutions: JSON.stringify(summary.decidedSolutions),
-      domain_knowledge: JSON.stringify(summary.domainKnowledge),
-      action_items:
-        summary.actionItems !== undefined ? JSON.stringify(summary.actionItems) : null,
-      raw_summary: summary.rawSummary,
-      created_at: summary.createdAt,
-      model_used: summary.modelUsed,
+  insertCycle(c: Cycle): void {
+    this.sqlite.prepare(`
+      INSERT INTO cycles (id, campaign_id, cycle_num, status, product_brief, screenshots, started_at, completed_at)
+      VALUES (@id, @campaign_id, @cycle_num, @status, @product_brief, @screenshots, @started_at, @completed_at)
+    `).run({
+      id: c.id,
+      campaign_id: c.campaignId,
+      cycle_num: c.cycleNum,
+      status: c.status,
+      product_brief: c.productBrief ?? null,
+      screenshots: c.screenshots ? JSON.stringify(c.screenshots) : null,
+      started_at: c.startedAt ?? null,
+      completed_at: c.completedAt ?? null,
     });
-    if (summary.tags.length > 0) {
-      this.addSessionTags(summary.sessionId, summary.tags);
-    }
   }
 
-  getSummary(sessionId: string): StoredSummary | undefined {
-    const row = this.sqlite
-      .prepare(
-        `SELECT * FROM summaries WHERE session_id = ? ORDER BY created_at DESC LIMIT 1`,
-      )
-      .get(sessionId) as Record<string, unknown> | undefined;
-    if (!row) return undefined;
-    const tags = this.getSessionTagNames(String(row.session_id));
-    return rowToStoredSummary(row, tags);
+  getCycle(id: string): Cycle | undefined {
+    const row = this.sqlite.prepare(`SELECT * FROM cycles WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    return row ? rowToCycle(row) : undefined;
   }
 
-  listSummaries(filters?: SummaryListFilters): StoredSummary[] {
-    const clauses: string[] = [];
+  getActiveCycle(campaignId: string): Cycle | undefined {
+    const row = this.sqlite.prepare(
+      `SELECT * FROM cycles WHERE campaign_id = ? AND status != 'completed' ORDER BY cycle_num DESC LIMIT 1`
+    ).get(campaignId) as Record<string, unknown> | undefined;
+    return row ? rowToCycle(row) : undefined;
+  }
+
+  listCycles(campaignId: string): Cycle[] {
+    const rows = this.sqlite.prepare(`SELECT * FROM cycles WHERE campaign_id = ? ORDER BY cycle_num ASC`).all(campaignId) as Record<string, unknown>[];
+    return rows.map(rowToCycle);
+  }
+
+  updateCycle(id: string, patch: Partial<Pick<Cycle, 'status' | 'productBrief' | 'screenshots' | 'startedAt' | 'completedAt'>>): void {
+    const sets: string[] = [];
     const params: unknown[] = [];
-
-    if (filters?.platform) {
-      clauses.push(`s.session_id IN (SELECT id FROM sessions WHERE platform = ?)`);
-      params.push(filters.platform);
-    }
-    if (filters?.dateFrom) {
-      clauses.push('s.created_at >= ?');
-      params.push(filters.dateFrom);
-    }
-    if (filters?.dateTo) {
-      clauses.push('s.created_at <= ?');
-      params.push(filters.dateTo);
-    }
-
-    const tagNames = filters?.tags?.filter(Boolean) ?? [];
-    for (const _ of tagNames) {
-      clauses.push(
-        `s.session_id IN (
-          SELECT st.session_id FROM session_tags st
-          JOIN tags t ON t.id = st.tag_id AND t.name = ?
-        )`,
-      );
-    }
-    params.push(...tagNames);
-
-    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const rows = this.sqlite
-      .prepare(
-        `SELECT s.* FROM summaries s ${where} ORDER BY s.created_at DESC`,
-      )
-      .all(...params) as Record<string, unknown>[];
-
-    return rows.map((row) =>
-      rowToStoredSummary(row, this.getSessionTagNames(String(row.session_id))),
-    );
+    if (patch.status !== undefined) { sets.push('status = ?'); params.push(patch.status); }
+    if (patch.productBrief !== undefined) { sets.push('product_brief = ?'); params.push(patch.productBrief); }
+    if (patch.screenshots !== undefined) { sets.push('screenshots = ?'); params.push(JSON.stringify(patch.screenshots)); }
+    if (patch.startedAt !== undefined) { sets.push('started_at = ?'); params.push(patch.startedAt); }
+    if (patch.completedAt !== undefined) { sets.push('completed_at = ?'); params.push(patch.completedAt); }
+    if (sets.length === 0) return;
+    params.push(id);
+    this.sqlite.prepare(`UPDATE cycles SET ${sets.join(', ')} WHERE id = ?`).run(...params);
   }
 
-  getOrCreateTag(name: string, color?: string): Tag {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      throw new Error('Tag name cannot be empty');
-    }
-    const existing = this.sqlite
-      .prepare(`SELECT id, name, color FROM tags WHERE name = ? COLLATE NOCASE`)
-      .get(trimmed) as { id: number; name: string; color: string | null } | undefined;
-    if (existing) {
-      return {
-        id: existing.id,
-        name: existing.name,
-        color: existing.color ?? undefined,
-      };
-    }
-    const info = this.sqlite
-      .prepare(`INSERT INTO tags (name, color) VALUES (?, ?)`)
-      .run(trimmed, color ?? null);
-    return {
-      id: Number(info.lastInsertRowid),
-      name: trimmed,
-      color,
-    };
-  }
+  // ── Tasks ──────────────────────────────────────────────────────────────────
 
-  addSessionTags(sessionId: string, tagNames: string[]): void {
-    const link = this.sqlite.prepare(
-      `INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?, ?)`,
-    );
-    const run = this.sqlite.transaction(() => {
-      for (const raw of tagNames) {
-        const tag = this.getOrCreateTag(raw);
-        link.run(sessionId, tag.id);
-      }
+  insertTask(t: Task): void {
+    this.sqlite.prepare(`
+      INSERT INTO tasks (id, cycle_id, role, title, description, acceptance, e2e_scenarios,
+        status, result, doc_audit_token, comments, created_at, completed_at)
+      VALUES (@id, @cycle_id, @role, @title, @description, @acceptance, @e2e_scenarios,
+        @status, @result, @doc_audit_token, @comments, @created_at, @completed_at)
+    `).run({
+      id: t.id,
+      cycle_id: t.cycleId,
+      role: t.role,
+      title: t.title,
+      description: t.description ?? null,
+      acceptance: t.acceptance ? JSON.stringify(t.acceptance) : null,
+      e2e_scenarios: t.e2eScenarios ? JSON.stringify(t.e2eScenarios) : null,
+      status: t.status,
+      result: t.result ?? null,
+      doc_audit_token: t.docAuditToken ?? null,
+      comments: t.comments ? JSON.stringify(t.comments) : null,
+      created_at: t.createdAt,
+      completed_at: t.completedAt ?? null,
     });
-    run();
   }
 
-  listTags(): Tag[] {
-    const rows = this.sqlite
-      .prepare(
-        `SELECT t.id, t.name, t.color, COUNT(st.session_id) AS cnt
-         FROM tags t
-         LEFT JOIN session_tags st ON st.tag_id = t.id
-         GROUP BY t.id
-         ORDER BY t.name COLLATE NOCASE`,
-      )
-      .all() as { id: number; name: string; color: string | null; cnt: number }[];
-    return rows.map((r) => ({
+  getTask(id: string): Task | undefined {
+    const row = this.sqlite.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    return row ? rowToTask(row) : undefined;
+  }
+
+  listTasks(cycleId: string, role?: Task['role']): Task[] {
+    if (role) {
+      const rows = this.sqlite.prepare(`SELECT * FROM tasks WHERE cycle_id = ? AND role = ? ORDER BY created_at ASC`).all(cycleId, role) as Record<string, unknown>[];
+      return rows.map(rowToTask);
+    }
+    const rows = this.sqlite.prepare(`SELECT * FROM tasks WHERE cycle_id = ? ORDER BY created_at ASC`).all(cycleId) as Record<string, unknown>[];
+    return rows.map(rowToTask);
+  }
+
+  updateTask(id: string, patch: Partial<Pick<Task, 'status' | 'result' | 'docAuditToken' | 'comments' | 'completedAt'>>): void {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (patch.status !== undefined) { sets.push('status = ?'); params.push(patch.status); }
+    if (patch.result !== undefined) { sets.push('result = ?'); params.push(patch.result); }
+    if (patch.docAuditToken !== undefined) { sets.push('doc_audit_token = ?'); params.push(patch.docAuditToken); }
+    if (patch.comments !== undefined) { sets.push('comments = ?'); params.push(JSON.stringify(patch.comments)); }
+    if (patch.completedAt !== undefined) { sets.push('completed_at = ?'); params.push(patch.completedAt); }
+    if (sets.length === 0) return;
+    params.push(id);
+    this.sqlite.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  // ── Roles ──────────────────────────────────────────────────────────────────
+
+  upsertRole(r: Role): void {
+    this.sqlite.prepare(`
+      INSERT INTO roles (id, name, system_prompt, doc_path, is_builtin, created_at)
+      VALUES (@id, @name, @system_prompt, @doc_path, @is_builtin, @created_at)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        system_prompt = excluded.system_prompt,
+        doc_path = excluded.doc_path
+    `).run({
       id: r.id,
       name: r.name,
-      color: r.color ?? undefined,
-      count: r.cnt,
+      system_prompt: r.systemPrompt,
+      doc_path: r.docPath ?? null,
+      is_builtin: r.isBuiltin ? 1 : 0,
+      created_at: r.createdAt,
+    });
+  }
+
+  getRole(id: string): Role | undefined {
+    const row = this.sqlite.prepare(`SELECT * FROM roles WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    return row ? rowToRole(row) : undefined;
+  }
+
+  listRoles(): Role[] {
+    const rows = this.sqlite.prepare(`SELECT * FROM roles ORDER BY is_builtin DESC, name ASC`).all() as Record<string, unknown>[];
+    return rows.map(rowToRole);
+  }
+
+  // ── Knowledge Chunks ────────────────────────────────────────────────────────
+
+  insertChunk(chunk: KnowledgeChunk): void {
+    this.sqlite.prepare(`
+      INSERT INTO knowledge_chunks (id, role_id, source_file, chunk_text, embedding, created_at)
+      VALUES (@id, @role_id, @source_file, @chunk_text, @embedding, @created_at)
+    `).run({
+      id: chunk.id,
+      role_id: chunk.roleId,
+      source_file: chunk.sourceFile ?? null,
+      chunk_text: chunk.chunkText,
+      embedding: chunk.embedding ? Buffer.from(chunk.embedding.buffer) : null,
+      created_at: chunk.createdAt,
+    });
+  }
+
+  getChunksForRole(roleId: string): KnowledgeChunk[] {
+    const rows = this.sqlite.prepare(`SELECT * FROM knowledge_chunks WHERE role_id = ?`).all(roleId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: String(row.id),
+      roleId: String(row.role_id),
+      sourceFile: row.source_file ? String(row.source_file) : undefined,
+      chunkText: String(row.chunk_text),
+      embedding: row.embedding ? new Float32Array((row.embedding as Buffer).buffer) : undefined,
+      createdAt: String(row.created_at),
     }));
   }
 
-  getTagSummaries(tagName: string): StoredSummary[] {
-    const rows = this.sqlite
-      .prepare(
-        `SELECT s.* FROM summaries s
-         JOIN session_tags st ON st.session_id = s.session_id
-         JOIN tags t ON t.id = st.tag_id AND t.name = ? COLLATE NOCASE
-         ORDER BY s.created_at DESC`,
-      )
-      .all(tagName) as Record<string, unknown>[];
-    return rows.map((row) =>
-      rowToStoredSummary(row, this.getSessionTagNames(String(row.session_id))),
-    );
+  deleteChunksForRole(roleId: string): void {
+    this.sqlite.prepare(`DELETE FROM knowledge_chunks WHERE role_id = ?`).run(roleId);
+  }
+
+  // ── Doc Audit ──────────────────────────────────────────────────────────────
+
+  insertDocAudit(entry: DocAuditEntry): void {
+    this.sqlite.prepare(`
+      INSERT INTO doc_audit_log (token, task_id, file_path, content_hash, created_at)
+      VALUES (@token, @task_id, @file_path, @content_hash, @created_at)
+    `).run({
+      token: entry.token,
+      task_id: entry.taskId ?? null,
+      file_path: entry.filePath,
+      content_hash: entry.contentHash,
+      created_at: entry.createdAt,
+    });
+  }
+
+  getDocAudit(token: string): DocAuditEntry | undefined {
+    const row = this.sqlite.prepare(`SELECT * FROM doc_audit_log WHERE token = ?`).get(token) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return {
+      token: String(row.token),
+      taskId: row.task_id ? String(row.task_id) : undefined,
+      filePath: String(row.file_path),
+      contentHash: String(row.content_hash),
+      createdAt: String(row.created_at),
+    };
   }
 
   close(): void {
     this.sqlite.close();
-    if (singleton === this) {
-      singleton = undefined;
-    }
-  }
-
-  /** Hydrate raw summary rows (e.g. from FTS queries) into {@link StoredSummary}. */
-  hydrateSummaryRows(rows: Record<string, unknown>[]): StoredSummary[] {
-    return rows.map((row) =>
-      rowToStoredSummary(row, this.getSessionTagNames(String(row.session_id))),
-    );
+    if (singleton === this) singleton = undefined;
   }
 }
 
-export function getDatabase(dbPath?: string): ChatDigestDB {
+export function getDatabase(dbPath?: string): AgentForgeDB {
   if (!singleton) {
-    singleton = new ChatDigestDB(dbPath ?? DEFAULT_DB_PATH);
+    singleton = new AgentForgeDB(dbPath ?? DEFAULT_DB_PATH);
     singleton.init();
   }
   return singleton;
