@@ -12,10 +12,12 @@ interface ChatMessage {
 
 export function RequirementDetail() {
   const { id } = useParams<{ id: string }>();
-  const { data: req, loading } = useGet<Requirement>(`/api/requirements/${id}`);
+  const { data: req, loading, refetch } = useGet<Requirement>(`/api/requirements/${id}`);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState<{ updated: boolean; fields?: string[]; message?: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,6 +50,31 @@ export function RequirementDetail() {
       console.error(err);
     } finally {
       setSending(false);
+    }
+  }
+
+  async function applyToRequirement() {
+    if (!messages.length || applying) return;
+    setApplying(true);
+    setApplyResult(null);
+    try {
+      const res = await fetch(`/api/requirements/${id}/apply-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history: messages }),
+      });
+      const data = await res.json() as { updated: boolean; fields?: string[]; message?: string; error?: string };
+      if (data.error) {
+        setApplyResult({ updated: false, message: data.error });
+      } else {
+        setApplyResult({ updated: data.updated, fields: data.fields, message: data.message });
+        if (data.updated) refetch(); // refresh left panel
+      }
+    } catch (err) {
+      setApplyResult({ updated: false, message: 'AI 服务暂时不可用' });
+      console.error(err);
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -135,9 +162,39 @@ export function RequirementDetail() {
 
         {/* Right: Chat */}
         <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-          <div className="border-b border-slate-100 px-4 py-3 text-sm font-medium text-slate-600 dark:border-zinc-800 dark:text-zinc-400">
-            与此需求对话
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 dark:border-zinc-800">
+            <span className="text-sm font-medium text-slate-600 dark:text-zinc-400">与此需求对话</span>
+            {messages.length > 0 && (
+              <button
+                onClick={applyToRequirement}
+                disabled={applying}
+                title="将对话中的新信息提取并更新到需求文档"
+                className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300"
+              >
+                {applying ? (
+                  <><span className="animate-spin">⟳</span> 分析中…</>
+                ) : (
+                  <>✦ 更新需求</>
+                )}
+              </button>
+            )}
           </div>
+
+          {/* Apply result toast */}
+          {applyResult && (
+            <div className={`mx-4 mt-3 rounded-lg px-4 py-3 text-sm ${
+              applyResult.updated
+                ? 'border border-green-200 bg-green-50 text-green-800 dark:border-green-900/50 dark:bg-green-900/20 dark:text-green-300'
+                : 'border border-slate-200 bg-slate-50 text-slate-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400'
+            }`}>
+              {applyResult.updated ? (
+                <span>✓ 已更新需求文档 — 更新字段：<strong>{applyResult.fields?.join('、')}</strong></span>
+              ) : (
+                <span>{applyResult.message ?? '对话中没有发现需要更新的新信息'}</span>
+              )}
+              <button onClick={() => setApplyResult(null)} className="ml-2 opacity-50 hover:opacity-100">×</button>
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto p-4">
             {messages.length === 0 && (
