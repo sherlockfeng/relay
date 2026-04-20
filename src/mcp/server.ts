@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod/v4';
@@ -325,6 +325,252 @@ export function createMcpServer(): McpServer {
   }, async ({ campaignId }) => {
     const summary = await summarizeCampaign(db, campaignId, config);
     return { content: [{ type: 'text', text: JSON.stringify(summary, null, 2) }] };
+  });
+
+  // ── Prompts ─────────────────────────────────────────────────────────────────
+
+  server.registerPrompt('relay:doc-first', {
+    description: 'Doc-First 开发纪律 — 任何代码变更前必须先更新文档',
+  }, () => ({
+    messages: [{
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `# Doc-First 开发纪律
+
+**核心规则：任何代码或设计变更，必须先修改对应文档，再写代码。**
+
+## 执行方式
+
+调用 MCP tool \`update_doc_first(filePath, content)\` 强制写文档，返回 \`auditToken\`，完成任务时附带此 token。
+
+\`\`\`
+❌ 改代码 → 改文档（或不改文档）
+✅ 改文档（update_doc_first）→ 改代码 → complete_task(docAuditToken)
+\`\`\`
+
+## 文档归属
+
+- 新功能 → 更新 \`docs/tech/DESIGN.md\` 对应模块
+- Bug fix → 在 \`docs/tech/DESIGN.md\` 添加约束说明
+- API 变更 → 更新接口文档
+- 产品决策 → 更新 \`docs/product/PRD.md\`
+
+跳过此规则的任务将被系统标记为违规，无法完成。`,
+      },
+    }],
+  }));
+
+  server.registerPrompt('relay:role-product', {
+    description: '产品 Agent 工作规范 — 截图分析、竞品研究、任务拆解',
+  }, () => ({
+    messages: [{
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `# 产品 Agent 工作规范
+
+你是 vibe coding 循环的**起点和终点**，负责分析现状并输出结构化任务列表。
+
+## 工作流程
+
+1. 调用 \`get_cycle_state(campaignId)\` 读取上一轮截图与状态
+2. 调用 \`update_doc_first("docs/product/PRD.md", content)\` 记录本轮决策（**必须在 create_tasks 之前**）
+3. 调用 \`create_tasks(cycleId, tasks)\` 输出任务列表
+
+## 任务格式
+
+\`\`\`json
+[
+  { "role": "dev",  "title": "...", "description": "...", "acceptanceCriteria": ["..."] },
+  { "role": "test", "title": "...", "description": "...", "e2eScenarios": ["..."] }
+]
+\`\`\`
+
+## 原则
+
+- 每轮不超过 3 个核心目标
+- 只描述**做什么**，不描述怎么做
+- 每个 dev 任务单次工作量不超过 4h
+- 不写代码，不写测试
+
+## 竞品分析格式
+
+\`\`\`
+竞品: [名称]
+亮点: [用户感知到的优势]
+差距: [我们目前缺少的]
+参考点: [具体可借鉴的交互/功能]
+\`\`\``,
+      },
+    }],
+  }));
+
+  server.registerPrompt('relay:role-developer', {
+    description: '研发 Agent 工作规范 — Doc-First 实现、任务边界、安全约束',
+  }, () => ({
+    messages: [{
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `# 研发 Agent 工作规范
+
+你负责将产品任务转化为可运行的代码实现。**文档先于代码**是最核心的约束。
+
+## 工作流程
+
+1. 调用 \`get_my_tasks(cycleId, "dev")\` 拉取任务
+2. 每个任务开始前调用 \`update_doc_first(filePath, content)\` 获取 \`auditToken\`
+3. 按 \`acceptanceCriteria\` 实现，不超出范围
+4. 调用 \`complete_task(taskId, { result, docAuditToken })\` 完成任务
+
+## 禁止事项
+
+- 不跳过 \`update_doc_first\`
+- 不修改测试 agent 负责的 e2e 测试文件
+- 不自行扩大功能范围（需通过任务系统反馈产品）
+- 不未完成当前 cycle 所有任务就推进下一 cycle
+
+## 技术约束
+
+- 跟随项目现有技术栈
+- 不引入 OWASP Top 10 漏洞（SQL 注入、XSS、命令注入等）
+- 注释只写 WHY，不写 WHAT
+- 有歧义时通过 \`add_task_comment(taskId, comment)\` 提问，不自行假设`,
+      },
+    }],
+  }));
+
+  server.registerPrompt('relay:role-qa', {
+    description: '测试 Agent 工作规范 — 攻击性 e2e 测试、截图规范、Bug 反馈',
+  }, () => ({
+    messages: [{
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `# 测试 Agent 工作规范
+
+你是质量守门人，工作风格是**攻击性的** — 假设代码有问题，主动寻找边界条件和异常路径。
+
+> "如果我没有发现问题，说明我测试不够深入，而不是代码没有问题。"
+
+## 攻击维度
+
+- **边界值**：空值、null、超长字符串、负数、特殊字符
+- **并发**：同时触发多个操作，检查竞态
+- **网络**：断网、超时、慢网（500ms+）、重复请求
+- **权限**：未授权访问、越权操作、token 过期
+- **状态**：非正常顺序操作、中途刷新、浏览器回退
+- **数据**：XSS payload、SQL 注入串、Unicode 边界字符
+
+## 工作流程
+
+1. 调用 \`get_my_tasks(cycleId, "test")\` 拉取任务
+2. 在 \`tests/e2e/cycle-{n}/\` 写 Playwright 测试（happy path ×1 + 边界/错误 path ×2+）
+3. 调用 \`run_e2e_tests(cycleId)\` 执行，自动截图
+4. 全通过 → \`complete_cycle(cycleId)\`；有失败 → \`create_bug_tasks(cycleId, bugs[])\`
+
+## 截图规范
+
+\`\`\`
+[PASS] 登录成功后跳转首页
+[FAIL] 密码为空时缺少错误提示
+[BUG]  并发提交时重复创建记录
+\`\`\`
+
+## 禁止事项
+
+- 不修改被测代码
+- 不只测 happy path
+- 不在测试失败时直接标记完成`,
+      },
+    }],
+  }));
+
+  // ── Setup Project Rules ──────────────────────────────────────────────────────
+
+  server.registerTool('setup_project_rules', {
+    description: 'Write relay rules to a project so they are auto-injected into every Cursor chat (.cursor/rules) and Claude Code session (CLAUDE.md).',
+    inputSchema: {
+      projectPath: z.string().describe('Absolute path to the project directory'),
+      rules: z.array(z.enum(['doc-first', 'role-product', 'role-developer', 'role-qa', 'git-branch']))
+        .min(1)
+        .describe('Which rules to inject'),
+    },
+  }, async ({ projectPath, rules }) => {
+    const absPath = resolve(projectPath);
+    const written: string[] = [];
+
+    const ruleContents: Record<string, { title: string; body: string }> = {
+      'doc-first': {
+        title: 'Doc-First 开发纪律',
+        body: '任何代码或设计变更，必须先调用 update_doc_first(filePath, content) 更新文档并获取 auditToken，再写代码，再 complete_task(docAuditToken)。跳过此规则的任务将被系统标记为违规。',
+      },
+      'role-product': {
+        title: '产品 Agent 规范',
+        body: '只输出任务列表，不写代码，不写测试。每轮不超过 3 个核心目标。必须在 create_tasks 之前调用 update_doc_first("docs/product/PRD.md", content)。',
+      },
+      'role-developer': {
+        title: '研发 Agent 规范',
+        body: '不跳过 update_doc_first。不修改 e2e 测试文件。不自行扩大功能范围。complete_task 必须附 docAuditToken。',
+      },
+      'role-qa': {
+        title: '测试 Agent 规范',
+        body: '攻击性测试，每个场景 happy path ×1 + 边界/错误 path ×2+。不修改被测代码。有失败通过 create_bug_tasks 反馈，不直接标记完成。',
+      },
+      'git-branch': {
+        title: 'Git 分支规范',
+        body: '每个需求使用独立语义化分支（feat/xxx、fix/xxx、chore/xxx、docs/xxx）。不复用 Claude 自动生成的 worktree 分支名。PR 目标分支为 main。',
+      },
+    };
+
+    const selectedRules = rules.map((r) => ruleContents[r]).filter(Boolean);
+    const combinedBody = selectedRules
+      .map((r) => `## ${r.title}\n\n${r.body}`)
+      .join('\n\n');
+
+    // Write .cursor/rules/relay.mdc for Cursor auto-injection
+    const cursorRulesDir = join(absPath, '.cursor', 'rules');
+    mkdirSync(cursorRulesDir, { recursive: true });
+    const cursorRulesPath = join(cursorRulesDir, 'relay.mdc');
+    writeFileSync(cursorRulesPath, `---
+description: Relay project rules (auto-injected)
+alwaysApply: true
+---
+
+# Relay Rules
+
+${combinedBody}
+`, 'utf8');
+    written.push('.cursor/rules/relay.mdc');
+
+    // Write / merge CLAUDE.md for Claude Code
+    const claudeMdPath = join(absPath, 'CLAUDE.md');
+    const marker = '<!-- relay-rules-start -->';
+    const endMarker = '<!-- relay-rules-end -->';
+    const newSection = `${marker}\n## Relay Rules\n\n${combinedBody}\n${endMarker}`;
+
+    if (existsSync(claudeMdPath)) {
+      let existing = readFileSync(claudeMdPath, 'utf8');
+      if (existing.includes(marker)) {
+        existing = existing.replace(new RegExp(`${marker}[\\s\\S]*?${endMarker}`), newSection);
+      } else {
+        existing = `${existing}\n\n${newSection}`;
+      }
+      writeFileSync(claudeMdPath, existing, 'utf8');
+    } else {
+      writeFileSync(claudeMdPath, `# Project Rules\n\n${newSection}\n`, 'utf8');
+    }
+    written.push('CLAUDE.md');
+
+    return {
+      content: [{ type: 'text', text: JSON.stringify({
+        projectPath: absPath,
+        rulesApplied: rules,
+        filesWritten: written,
+        message: 'Rules written. Restart Cursor / Claude Code to pick up changes.',
+      }, null, 2) }],
+    };
   });
 
   return server;
