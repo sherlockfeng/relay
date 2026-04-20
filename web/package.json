@@ -1,5 +1,5 @@
 {
-  "name": "ai-chat-digest-web",
+  "name": "relay-web",
   "private": true,
   "type": "module",
   "scripts": {
