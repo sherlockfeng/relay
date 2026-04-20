@@ -32,6 +32,19 @@ export function createApiServer(webDistPath?: string) {
     res.json(req_);
   });
 
+  app.patch('/api/requirements/:id', (req, res) => {
+    const existing = db.getRequirement(req.params.id);
+    if (!existing) { res.status(404).json({ error: 'Not found' }); return; }
+    const allowed = ['name', 'purpose', 'context', 'summary', 'relatedDocs', 'changes', 'tags', 'status'] as const;
+    const patch: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) patch[key] = req.body[key];
+    }
+    if (Object.keys(patch).length === 0) { res.status(400).json({ error: 'No valid fields to update' }); return; }
+    db.updateRequirement(req.params.id, patch as Parameters<typeof db.updateRequirement>[1]);
+    res.json(db.getRequirement(req.params.id));
+  });
+
   app.post('/api/requirements/:id/chat', async (req, res) => {
     const requirement = db.getRequirement(req.params.id);
     if (!requirement) { res.status(404).json({ error: 'Not found' }); return; }
@@ -190,6 +203,15 @@ export function createApiServer(webDistPath?: string) {
         res.json({ updated: false, message: '对话中没有发现需要更新的新信息' });
         return;
       }
+      // Strip placeholder values AI sometimes returns for "no change" fields
+      const NO_CHANGE_MARKERS = /^(不变|无变化|同上|unchanged|no change|n\/a|same|保持不变|无|-)$/i;
+      for (const key of Object.keys(updates)) {
+        const val = updates[key];
+        if (typeof val === 'string' && NO_CHANGE_MARKERS.test(val.trim())) {
+          delete updates[key];
+        }
+      }
+
       if (Object.keys(updates).length === 0) {
         res.json({ updated: false, message: '对话中没有发现需要更新的新信息' });
         return;

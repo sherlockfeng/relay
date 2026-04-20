@@ -379,35 +379,34 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Prose({ children }: { children: string }) {
   return (
-    <ReactMarkdown
-      components={{
-        p: ({ children }) => (
-          <p className="mb-2 text-sm leading-relaxed text-slate-700 last:mb-0 dark:text-zinc-300">{children}</p>
-        ),
-        strong: ({ children }) => (
-          <strong className="font-semibold text-slate-800 dark:text-zinc-100">{children}</strong>
-        ),
-        ul: ({ children }) => (
-          <ul className="mb-2 flex flex-col gap-1 last:mb-0">{children}</ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="mb-2 flex flex-col gap-1 last:mb-0">{children}</ol>
-        ),
-        li: ({ children }) => (
-          <li className="flex gap-2 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
-            <span className="mt-1 shrink-0 text-indigo-400">•</span>
-            <span>{children}</span>
-          </li>
-        ),
-        a: ({ href, children }) => (
-          <a href={href} target="_blank" rel="noopener noreferrer"
-            className="text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400">
-            {children}
-          </a>
-        ),
-      }}
-    >
-      {children}
-    </ReactMarkdown>
+    <div className="prose-relay text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => (
+            <p className="mb-2 last:mb-0">{children}</p>
+          ),
+          strong: ({ children }) => (
+            <strong className="font-semibold text-slate-800 dark:text-zinc-100">{children}</strong>
+          ),
+          ul: ({ children }) => (
+            <ul className="mb-2 list-disc space-y-0.5 pl-5 last:mb-0">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="mb-2 list-decimal space-y-0.5 pl-5 last:mb-0">{children}</ol>
+          ),
+          li: ({ children }) => (
+            <li className="leading-relaxed">{children}</li>
+          ),
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer"
+              className="text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
   );
 }
