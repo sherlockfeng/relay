@@ -12,6 +12,8 @@ import { seedBuiltinRoles, listRoles, getRole, trainRole, searchKnowledge } from
 import { WorkflowEngine } from '../workflow/engine.js';
 import { AgentSpawner } from '../spawner/index.js';
 import { summarizeCampaign } from '../summarizer/campaign.js';
+import { startCapture, submitAnswers, confirmCapture } from '../requirements/capture.js';
+import { recallRequirements, formatRequirementForInjection } from '../requirements/recall.js';
 
 export function createMcpServer(): McpServer {
   const config = loadConfig();
@@ -483,6 +485,130 @@ export function createMcpServer(): McpServer {
 - 不修改被测代码
 - 不只测 happy path
 - 不在测试失败时直接标记完成`,
+      },
+    }],
+  }));
+
+  // ── Requirements ────────────────────────────────────────────────────────────
+
+  server.registerTool('capture_requirement', {
+    description: `Capture and save a requirement from a chat session. Multi-turn flow:
+1. action="start": provide chatContext + name → returns clarifying questions
+2. action="answer": provide sessionId + answers → returns draft summary for review
+3. action="confirm": provide sessionId + optional edits → saves to DB, returns requirementId`,
+    inputSchema: {
+      action: z.enum(['start', 'answer', 'confirm']),
+      name: z.string().optional().describe('Requirement name (required for start)'),
+      chatContext: z.string().optional().describe('Summary of the chat / what was discussed (required for start)'),
+      sessionId: z.string().optional().describe('Session ID from start step (required for answer/confirm)'),
+      answers: z.record(z.string()).optional().describe('Answers to clarifying questions (for action=answer)'),
+      edits: z.object({
+        name: z.string().optional(),
+        purpose: z.string().optional(),
+        summary: z.string().optional(),
+        relatedDocs: z.array(z.string()).optional(),
+        changes: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional(),
+      }).optional().describe('Optional edits to the draft before confirming'),
+    },
+  }, async ({ action, name, chatContext, sessionId, answers, edits }) => {
+    if (action === 'start') {
+      if (!chatContext || !name) {
+        return { content: [{ type: 'text', text: 'name and chatContext are required for action=start' }], isError: true };
+      }
+      const result = startCapture(db, chatContext, name);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          sessionId: result.sessionId,
+          nextStep: 'Call capture_requirement(action="answer", sessionId, answers={...}) with your answers.',
+          questions: result.questions,
+        }, null, 2) }],
+      };
+    }
+
+    if (action === 'answer') {
+      if (!sessionId || !answers) {
+        return { content: [{ type: 'text', text: 'sessionId and answers are required for action=answer' }], isError: true };
+      }
+      const result = submitAnswers(db, sessionId, answers);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          phase: result.phase,
+          draft: result.draft,
+          nextStep: 'Review the draft above. Call capture_requirement(action="confirm", sessionId, edits={...}) to save. Pass edits only if corrections are needed.',
+        }, null, 2) }],
+      };
+    }
+
+    if (action === 'confirm') {
+      if (!sessionId) {
+        return { content: [{ type: 'text', text: 'sessionId is required for action=confirm' }], isError: true };
+      }
+      const req = confirmCapture(db, sessionId, edits);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          requirementId: req.id,
+          name: req.name,
+          status: req.status,
+          message: `Requirement "${req.name}" saved. Use recall_requirement(id: "${req.id}") to inject it into any future chat.`,
+        }, null, 2) }],
+      };
+    }
+
+    return { content: [{ type: 'text', text: 'Unknown action' }], isError: true };
+  });
+
+  server.registerTool('recall_requirement', {
+    description: 'Recall a saved requirement. Without args returns a list to choose from. Pass id or name to get the full context formatted for injection into the current chat.',
+    inputSchema: {
+      id: z.string().optional().describe('Requirement ID'),
+      name: z.string().optional().describe('Fuzzy name search'),
+    },
+  }, async ({ id, name }) => {
+    if (id) {
+      const req = db.getRequirement(id);
+      if (!req) return { content: [{ type: 'text', text: `Requirement not found: ${id}` }], isError: true };
+      return { content: [{ type: 'text', text: formatRequirementForInjection(req) }] };
+    }
+
+    const list = recallRequirements(db, name);
+    if (list.length === 0) {
+      return { content: [{ type: 'text', text: name ? `No requirements matching "${name}".` : 'No requirements saved yet.' }] };
+    }
+
+    if (name && list.length === 1) {
+      return { content: [{ type: 'text', text: formatRequirementForInjection(list[0]) }] };
+    }
+
+    return {
+      content: [{ type: 'text', text: JSON.stringify({
+        message: list.length === 1 ? undefined : 'Multiple matches — pass id to get full context.',
+        requirements: list.map((r) => ({
+          id: r.id, name: r.name, status: r.status,
+          purpose: r.purpose?.slice(0, 80),
+          tags: r.tags,
+          updatedAt: r.updatedAt.slice(0, 10),
+        })),
+      }, null, 2) }],
+    };
+  });
+
+  server.registerPrompt('relay:recall-requirement', {
+    description: '唤起一个已沉淀的需求，将其上下文注入到当前 chat',
+  }, () => ({
+    messages: [{
+      role: 'user',
+      content: {
+        type: 'text',
+        text: `请帮我唤起一个已保存的需求并注入到当前对话上下文。
+
+步骤：
+1. 调用 \`recall_requirement()\`（不传参数）获取所有已保存需求列表
+2. 展示列表让我选择，或者如果我已经说了需求名字，直接调用 \`recall_requirement(name: "...")\`
+3. 确认后调用 \`recall_requirement(id: "...")\` 获取完整内容
+4. 将需求内容注入到上下文，后续对话基于此需求展开
+
+你现在可以开始了。`,
       },
     }],
   }));
