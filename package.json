@@ -9,9 +9,12 @@
   },
   "scripts": {
     "dev": "tsup --watch",
+    "dev:web": "pnpm --filter relay-web dev",
+    "dev:api": "node dist/cli/index.js web",
     "build": "tsup && pnpm --filter relay-web build",
     "build:backend": "tsup",
     "build:frontend": "pnpm --filter relay-web build",
+    "web": "pnpm build && node dist/cli/index.js web",
     "start": "node dist/cli/index.js start",
     "test": "vitest run",
     "test:watch": "vitest",

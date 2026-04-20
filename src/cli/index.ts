@@ -10,6 +10,7 @@ import { seedBuiltinRoles } from '../roles/library.js';
 import { WorkflowEngine } from '../workflow/engine.js';
 import { summarizeCampaign } from '../summarizer/campaign.js';
 import { startMcpServer } from '../mcp/server.js';
+import { startApiServer } from '../server/api.js';
 
 const ansi = {
   reset: '\x1b[0m',
@@ -211,5 +212,17 @@ program
         }
       }),
   );
+
+// ── web ───────────────────────────────────────────────────────────────────────
+
+program
+  .command('web')
+  .description('Start the Relay web dashboard (API + static frontend)')
+  .option('-p, --port <number>', 'Port to listen on', '3000')
+  .action(async (opts: { port: string }) => {
+    const port = parseInt(opts.port, 10);
+    const webDist = join(new URL('../../web/dist', import.meta.url).pathname);
+    await startApiServer(port, webDist);
+  });
 
 program.parse();
