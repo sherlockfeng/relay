@@ -1,4 +1,3 @@
-import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -727,13 +726,3 @@ export async function startMcpServer(): Promise<void> {
   await mcp.connect(transport);
 }
 
-const isMain =
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (isMain) {
-  startMcpServer().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
-}
