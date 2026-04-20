@@ -2,7 +2,9 @@ import express from 'express';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { getDatabase } from '../storage/database.js';
+import type { RequirementTodo } from '../storage/database.js';
 import { loadConfig } from '../config.js';
 import { recallRequirements, formatRequirementForInjection } from '../requirements/recall.js';
 import Anthropic from '@anthropic-ai/sdk';
@@ -77,6 +79,44 @@ export function createApiServer(webDistPath?: string) {
       console.error('[chat error]', err);
       res.status(500).json({ error: message });
     }
+  });
+
+  // ── Todos ────────────────────────────────────────────────────────────────────
+
+  app.post('/api/requirements/:id/todos', (req, res) => {
+    const requirement = db.getRequirement(req.params.id);
+    if (!requirement) { res.status(404).json({ error: 'Not found' }); return; }
+    const { text } = req.body as { text?: string };
+    if (!text?.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+    const todo: RequirementTodo = {
+      id: randomUUID(),
+      text: text.trim(),
+      done: false,
+      createdAt: new Date().toISOString(),
+    };
+    const todos = [...(requirement.todos ?? []), todo];
+    db.updateRequirement(requirement.id, { todos });
+    res.json(todo);
+  });
+
+  app.patch('/api/requirements/:id/todos/:todoId', (req, res) => {
+    const requirement = db.getRequirement(req.params.id);
+    if (!requirement) { res.status(404).json({ error: 'Not found' }); return; }
+    const { done, text } = req.body as { done?: boolean; text?: string };
+    const todos = (requirement.todos ?? []).map((t) => {
+      if (t.id !== req.params.todoId) return t;
+      return { ...t, ...(done !== undefined ? { done } : {}), ...(text ? { text } : {}) };
+    });
+    db.updateRequirement(requirement.id, { todos });
+    res.json(todos.find((t) => t.id === req.params.todoId));
+  });
+
+  app.delete('/api/requirements/:id/todos/:todoId', (req, res) => {
+    const requirement = db.getRequirement(req.params.id);
+    if (!requirement) { res.status(404).json({ error: 'Not found' }); return; }
+    const todos = (requirement.todos ?? []).filter((t) => t.id !== req.params.todoId);
+    db.updateRequirement(requirement.id, { todos });
+    res.json({ ok: true });
   });
 
   app.post('/api/requirements/:id/apply-chat', async (req, res) => {

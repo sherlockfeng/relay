@@ -69,6 +69,13 @@ export interface KnowledgeChunk {
   createdAt: string;
 }
 
+export interface RequirementTodo {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: string;
+}
+
 export interface Requirement {
   id: string;
   name: string;
@@ -78,6 +85,7 @@ export interface Requirement {
   relatedDocs?: string[];
   changes?: string[];
   tags?: string[];
+  todos?: RequirementTodo[];
   projectPath?: string;
   status: 'draft' | 'confirmed';
   createdAt: string;
@@ -273,6 +281,11 @@ export class AgentForgeDB {
       CREATE INDEX IF NOT EXISTS idx_chunks_role ON knowledge_chunks(role_id);
       CREATE INDEX IF NOT EXISTS idx_requirements_name ON requirements(name);
     `);
+
+    // Migrations — safe to run repeatedly
+    try {
+      this.sqlite.exec(`ALTER TABLE requirements ADD COLUMN todos TEXT`);
+    } catch { /* column already exists */ }
   }
 
   // ── Campaigns ──────────────────────────────────────────────────────────────
@@ -480,14 +493,15 @@ export class AgentForgeDB {
 
   insertRequirement(r: Requirement): void {
     this.sqlite.prepare(`
-      INSERT INTO requirements (id, name, purpose, context, summary, related_docs, changes, tags, project_path, status, created_at, updated_at)
-      VALUES (@id, @name, @purpose, @context, @summary, @related_docs, @changes, @tags, @project_path, @status, @created_at, @updated_at)
+      INSERT INTO requirements (id, name, purpose, context, summary, related_docs, changes, tags, todos, project_path, status, created_at, updated_at)
+      VALUES (@id, @name, @purpose, @context, @summary, @related_docs, @changes, @tags, @todos, @project_path, @status, @created_at, @updated_at)
     `).run({
       id: r.id, name: r.name, purpose: r.purpose ?? null, context: r.context,
       summary: r.summary ?? null,
       related_docs: r.relatedDocs ? JSON.stringify(r.relatedDocs) : null,
       changes: r.changes ? JSON.stringify(r.changes) : null,
       tags: r.tags ? JSON.stringify(r.tags) : null,
+      todos: r.todos ? JSON.stringify(r.todos) : null,
       project_path: r.projectPath ?? null,
       status: r.status, created_at: r.createdAt, updated_at: r.updatedAt,
     });
@@ -503,6 +517,7 @@ export class AgentForgeDB {
     if (patch.relatedDocs !== undefined) { sets.push('related_docs = ?'); params.push(JSON.stringify(patch.relatedDocs)); }
     if (patch.changes !== undefined) { sets.push('changes = ?'); params.push(JSON.stringify(patch.changes)); }
     if (patch.tags !== undefined) { sets.push('tags = ?'); params.push(JSON.stringify(patch.tags)); }
+    if (patch.todos !== undefined) { sets.push('todos = ?'); params.push(JSON.stringify(patch.todos)); }
     if (patch.projectPath !== undefined) { sets.push('project_path = ?'); params.push(patch.projectPath); }
     if (patch.status !== undefined) { sets.push('status = ?'); params.push(patch.status); }
     params.push(id);
@@ -535,6 +550,7 @@ export class AgentForgeDB {
       relatedDocs: parseJson<string[]>(row.related_docs as string, []),
       changes: parseJson<string[]>(row.changes as string, []),
       tags: parseJson<string[]>(row.tags as string, []),
+      todos: parseJson<RequirementTodo[]>(row.todos as string, []),
       projectPath: row.project_path ? String(row.project_path) : undefined,
       status: row.status as Requirement['status'],
       createdAt: String(row.created_at), updatedAt: String(row.updated_at),

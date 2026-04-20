@@ -35,6 +35,13 @@ export function formatRequirementForInjection(req: Requirement): string {
     lines.push(`## 标签\n${req.tags.map((t) => `\`${t}\``).join(' ')}`);
   }
 
+  const pendingTodos = (req.todos ?? []).filter((t) => !t.done);
+  if (pendingTodos.length > 0) {
+    lines.push(`## 待办事项 (${pendingTodos.length} 条未完成)`);
+    pendingTodos.forEach((t) => lines.push(`- [ ] ${t.text}`));
+    lines.push('');
+  }
+
   if (req.context) {
     lines.push('', `## 原始 Chat 上下文\n${req.context.slice(0, 800)}${req.context.length > 800 ? '…（已截断）' : ''}`);
   }
