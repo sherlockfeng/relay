@@ -500,8 +500,9 @@ export function createMcpServer(): McpServer {
       action: z.enum(['start', 'answer', 'confirm']),
       name: z.string().optional().describe('Requirement name (required for start)'),
       chatContext: z.string().optional().describe('Summary of the chat / what was discussed (required for start)'),
+      requirementId: z.string().optional().describe('Existing requirement ID — pass to update instead of create'),
       sessionId: z.string().optional().describe('Session ID from start step (required for answer/confirm)'),
-      answers: z.record(z.string()).optional().describe('Answers to clarifying questions (for action=answer)'),
+      answers: z.record(z.string(), z.string()).optional().describe('Answers to clarifying questions (for action=answer)'),
       edits: z.object({
         name: z.string().optional(),
         purpose: z.string().optional(),
@@ -511,15 +512,20 @@ export function createMcpServer(): McpServer {
         tags: z.array(z.string()).optional(),
       }).optional().describe('Optional edits to the draft before confirming'),
     },
-  }, async ({ action, name, chatContext, sessionId, answers, edits }) => {
+  }, async ({ action, name, chatContext, requirementId, sessionId, answers, edits }) => {
     if (action === 'start') {
-      if (!chatContext || !name) {
-        return { content: [{ type: 'text', text: 'name and chatContext are required for action=start' }], isError: true };
+      if (!chatContext) {
+        return { content: [{ type: 'text', text: 'chatContext is required for action=start' }], isError: true };
       }
-      const result = startCapture(db, chatContext, name);
+      if (!name && !requirementId) {
+        return { content: [{ type: 'text', text: 'name or requirementId is required for action=start' }], isError: true };
+      }
+      const result = startCapture(db, chatContext, name ?? '', requirementId);
       return {
         content: [{ type: 'text', text: JSON.stringify({
           sessionId: result.sessionId,
+          isUpdate: result.isUpdate,
+          ...(result.existing ? { existing: { name: result.existing.name, purpose: result.existing.purpose, tags: result.existing.tags } } : {}),
           nextStep: 'Call capture_requirement(action="answer", sessionId, answers={...}) with your answers.',
           questions: result.questions,
         }, null, 2) }],
