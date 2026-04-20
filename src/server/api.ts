@@ -64,8 +64,18 @@ export function createApiServer(webDistPath?: string) {
       });
       const text = response.content.filter((b) => b.type === 'text').map((b) => (b as { type: 'text'; text: string }).text).join('');
       res.json({ reply: text });
-    } catch (err) {
-      res.status(500).json({ error: String(err) });
+    } catch (err: unknown) {
+      // Return a clean human-readable message; avoid leaking raw HTML or stack traces
+      let message = 'AI 服务暂时不可用，请稍后重试';
+      if (err instanceof Error) {
+        const status = (err as { status?: number }).status;
+        if (status === 401) message = 'API Key 无效，请检查 ~/.relay/config.json 中的 llm.apiKey';
+        else if (status === 429) message = '请求过于频繁，请稍后重试';
+        else if (status && status >= 500) message = `AI 服务异常（${status}），请稍后重试`;
+        else if (err.message && !err.message.includes('<html')) message = err.message;
+      }
+      console.error('[chat error]', err);
+      res.status(500).json({ error: message });
     }
   });
 
