@@ -60,7 +60,7 @@
 ## 7. 用户旅程
 
 ```
-1. 安装 → ai-chat-digest start（一行命令）
+1. 安装 → relay start（一行命令）
 2. 接入 → 配置 MCP server 到 Cursor / Claude Code / Codex（一次性）
 3. 使用 → 正常使用 AI 工具，无需任何额外操作
 4. 查看 → 打开 localhost:3000 Dashboard

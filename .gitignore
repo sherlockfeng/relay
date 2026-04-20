@@ -1,7 +1,8 @@
 node_modules/
+.pnpm-store/
 dist/
 web/dist/
 *.db
 *.db-journal
 .env
-.ai-chat-digest/
+.relay/
