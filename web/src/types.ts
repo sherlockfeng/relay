@@ -1,3 +1,18 @@
+export interface Requirement {
+  id: string;
+  name: string;
+  purpose?: string;
+  context: string;
+  summary?: string;
+  relatedDocs?: string[];
+  changes?: string[];
+  tags?: string[];
+  projectPath?: string;
+  status: 'draft' | 'confirmed';
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Mirrors backend `TrackedSession`. */
 export type SessionStatus = 'active' | 'idle' | 'completed';
 export type Platform = 'cursor' | 'claude-code' | 'codex';

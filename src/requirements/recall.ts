@@ -1,0 +1,43 @@
+import type { AgentForgeDB, Requirement } from '../storage/database.js';
+
+export function recallRequirements(db: AgentForgeDB, query?: string): Requirement[] {
+  return db.listRequirements(query);
+}
+
+export function formatRequirementForInjection(req: Requirement): string {
+  const lines: string[] = [
+    `# 需求：${req.name}`,
+    `> 状态：${req.status === 'confirmed' ? '已确认' : '草稿'} | 创建于 ${req.createdAt.slice(0, 10)}`,
+    '',
+  ];
+
+  if (req.purpose) {
+    lines.push(`## 目的\n${req.purpose}`, '');
+  }
+
+  if (req.summary) {
+    lines.push(`## 摘要\n${req.summary}`, '');
+  }
+
+  if (req.changes && req.changes.length > 0) {
+    lines.push(`## 主要改动`);
+    req.changes.forEach((c) => lines.push(`- ${c}`));
+    lines.push('');
+  }
+
+  if (req.relatedDocs && req.relatedDocs.length > 0) {
+    lines.push(`## 相关文档`);
+    req.relatedDocs.forEach((d) => lines.push(`- ${d}`));
+    lines.push('');
+  }
+
+  if (req.tags && req.tags.length > 0) {
+    lines.push(`## 标签\n${req.tags.map((t) => `\`${t}\``).join(' ')}`);
+  }
+
+  if (req.context) {
+    lines.push('', `## 原始 Chat 上下文\n${req.context.slice(0, 800)}${req.context.length > 800 ? '…（已截断）' : ''}`);
+  }
+
+  return lines.join('\n');
+}

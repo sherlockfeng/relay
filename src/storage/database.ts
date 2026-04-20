@@ -69,6 +69,31 @@ export interface KnowledgeChunk {
   createdAt: string;
 }
 
+export interface Requirement {
+  id: string;
+  name: string;
+  purpose?: string;
+  context: string;
+  summary?: string;
+  relatedDocs?: string[];
+  changes?: string[];
+  tags?: string[];
+  projectPath?: string;
+  status: 'draft' | 'confirmed';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CaptureSession {
+  id: string;
+  requirementId?: string;
+  phase: 'questioning' | 'confirming' | 'done';
+  answers: Record<string, string>;
+  draft?: Partial<Requirement>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DocAuditEntry {
   token: string;
   taskId?: string;
@@ -217,10 +242,36 @@ export class AgentForgeDB {
         created_at   TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS requirements (
+        id           TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        purpose      TEXT,
+        context      TEXT NOT NULL,
+        summary      TEXT,
+        related_docs TEXT,
+        changes      TEXT,
+        tags         TEXT,
+        project_path TEXT,
+        status       TEXT DEFAULT 'draft',
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS capture_sessions (
+        id             TEXT PRIMARY KEY,
+        requirement_id TEXT,
+        phase          TEXT NOT NULL,
+        answers        TEXT DEFAULT '{}',
+        draft          TEXT,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_cycles_campaign ON cycles(campaign_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_cycle ON tasks(cycle_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_role ON tasks(role, status);
       CREATE INDEX IF NOT EXISTS idx_chunks_role ON knowledge_chunks(role_id);
+      CREATE INDEX IF NOT EXISTS idx_requirements_name ON requirements(name);
     `);
   }
 
@@ -423,6 +474,108 @@ export class AgentForgeDB {
 
   deleteChunksForRole(roleId: string): void {
     this.sqlite.prepare(`DELETE FROM knowledge_chunks WHERE role_id = ?`).run(roleId);
+  }
+
+  // ── Requirements ───────────────────────────────────────────────────────────
+
+  insertRequirement(r: Requirement): void {
+    this.sqlite.prepare(`
+      INSERT INTO requirements (id, name, purpose, context, summary, related_docs, changes, tags, project_path, status, created_at, updated_at)
+      VALUES (@id, @name, @purpose, @context, @summary, @related_docs, @changes, @tags, @project_path, @status, @created_at, @updated_at)
+    `).run({
+      id: r.id, name: r.name, purpose: r.purpose ?? null, context: r.context,
+      summary: r.summary ?? null,
+      related_docs: r.relatedDocs ? JSON.stringify(r.relatedDocs) : null,
+      changes: r.changes ? JSON.stringify(r.changes) : null,
+      tags: r.tags ? JSON.stringify(r.tags) : null,
+      project_path: r.projectPath ?? null,
+      status: r.status, created_at: r.createdAt, updated_at: r.updatedAt,
+    });
+  }
+
+  updateRequirement(id: string, patch: Partial<Omit<Requirement, 'id' | 'createdAt'>>): void {
+    const sets: string[] = ['updated_at = ?'];
+    const params: unknown[] = [new Date().toISOString()];
+    if (patch.name !== undefined) { sets.push('name = ?'); params.push(patch.name); }
+    if (patch.purpose !== undefined) { sets.push('purpose = ?'); params.push(patch.purpose); }
+    if (patch.context !== undefined) { sets.push('context = ?'); params.push(patch.context); }
+    if (patch.summary !== undefined) { sets.push('summary = ?'); params.push(patch.summary); }
+    if (patch.relatedDocs !== undefined) { sets.push('related_docs = ?'); params.push(JSON.stringify(patch.relatedDocs)); }
+    if (patch.changes !== undefined) { sets.push('changes = ?'); params.push(JSON.stringify(patch.changes)); }
+    if (patch.tags !== undefined) { sets.push('tags = ?'); params.push(JSON.stringify(patch.tags)); }
+    if (patch.projectPath !== undefined) { sets.push('project_path = ?'); params.push(patch.projectPath); }
+    if (patch.status !== undefined) { sets.push('status = ?'); params.push(patch.status); }
+    params.push(id);
+    this.sqlite.prepare(`UPDATE requirements SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  getRequirement(id: string): Requirement | undefined {
+    const row = this.sqlite.prepare(`SELECT * FROM requirements WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    return row ? this.rowToRequirement(row) : undefined;
+  }
+
+  listRequirements(query?: string): Requirement[] {
+    let rows: Record<string, unknown>[];
+    if (query) {
+      rows = this.sqlite.prepare(
+        `SELECT * FROM requirements WHERE name LIKE ? OR summary LIKE ? OR purpose LIKE ? ORDER BY updated_at DESC`
+      ).all(`%${query}%`, `%${query}%`, `%${query}%`) as Record<string, unknown>[];
+    } else {
+      rows = this.sqlite.prepare(`SELECT * FROM requirements ORDER BY updated_at DESC`).all() as Record<string, unknown>[];
+    }
+    return rows.map((r) => this.rowToRequirement(r));
+  }
+
+  private rowToRequirement(row: Record<string, unknown>): Requirement {
+    return {
+      id: String(row.id), name: String(row.name),
+      purpose: row.purpose ? String(row.purpose) : undefined,
+      context: String(row.context),
+      summary: row.summary ? String(row.summary) : undefined,
+      relatedDocs: parseJson<string[]>(row.related_docs as string, []),
+      changes: parseJson<string[]>(row.changes as string, []),
+      tags: parseJson<string[]>(row.tags as string, []),
+      projectPath: row.project_path ? String(row.project_path) : undefined,
+      status: row.status as Requirement['status'],
+      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    };
+  }
+
+  // ── Capture Sessions ────────────────────────────────────────────────────────
+
+  insertCaptureSession(s: CaptureSession): void {
+    this.sqlite.prepare(`
+      INSERT INTO capture_sessions (id, requirement_id, phase, answers, draft, created_at, updated_at)
+      VALUES (@id, @requirement_id, @phase, @answers, @draft, @created_at, @updated_at)
+    `).run({
+      id: s.id, requirement_id: s.requirementId ?? null, phase: s.phase,
+      answers: JSON.stringify(s.answers), draft: s.draft ? JSON.stringify(s.draft) : null,
+      created_at: s.createdAt, updated_at: s.updatedAt,
+    });
+  }
+
+  updateCaptureSession(id: string, patch: Partial<Pick<CaptureSession, 'phase' | 'answers' | 'draft' | 'requirementId'>>): void {
+    const sets: string[] = ['updated_at = ?'];
+    const params: unknown[] = [new Date().toISOString()];
+    if (patch.phase !== undefined) { sets.push('phase = ?'); params.push(patch.phase); }
+    if (patch.answers !== undefined) { sets.push('answers = ?'); params.push(JSON.stringify(patch.answers)); }
+    if (patch.draft !== undefined) { sets.push('draft = ?'); params.push(JSON.stringify(patch.draft)); }
+    if (patch.requirementId !== undefined) { sets.push('requirement_id = ?'); params.push(patch.requirementId); }
+    params.push(id);
+    this.sqlite.prepare(`UPDATE capture_sessions SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  getCaptureSession(id: string): CaptureSession | undefined {
+    const row = this.sqlite.prepare(`SELECT * FROM capture_sessions WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return {
+      id: String(row.id),
+      requirementId: row.requirement_id ? String(row.requirement_id) : undefined,
+      phase: row.phase as CaptureSession['phase'],
+      answers: parseJson<Record<string, string>>(row.answers as string, {}),
+      draft: row.draft ? parseJson<Partial<Requirement>>(row.draft as string, {}) : undefined,
+      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    };
   }
 
   // ── Doc Audit ──────────────────────────────────────────────────────────────
