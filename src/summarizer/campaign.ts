@@ -9,7 +9,7 @@ export interface CampaignSummary {
   overallPath: string;
 }
 
-interface CycleSummary {
+export interface CycleSummary {
   cycleNum: number;
   productBrief?: string;
   devWork: string[];
@@ -75,7 +75,7 @@ export async function summarizeCampaign(
   return parsed;
 }
 
-function buildSummarizationPrompt(
+export function buildSummarizationPrompt(
   title: string,
   brief: string | undefined,
   cycles: CycleSummary[],
@@ -117,7 +117,7 @@ Describe the journey from the initial brief to the final state. What was the arc
 Write concisely. Focus on the reasoning and evolution, not just facts.`;
 }
 
-function parseSummaryResponse(raw: string, cycles: CycleSummary[]): CampaignSummary {
+export function parseSummaryResponse(raw: string, cycles: CycleSummary[]): CampaignSummary {
   const whyMatch = raw.match(/## Why\n([\s\S]*?)(?=\n## |$)/);
   const decisionsMatch = raw.match(/## Key Decisions\n([\s\S]*?)(?=\n## |$)/);
   const pathMatch = raw.match(/## Overall Path\n([\s\S]*?)(?=\n## |$)/);
@@ -125,7 +125,7 @@ function parseSummaryResponse(raw: string, cycles: CycleSummary[]): CampaignSumm
   const parseList = (text: string): string[] =>
     text
       .split('\n')
-      .map((l) => l.replace(/^[-*\d.]\s*/, '').trim())
+      .map((l) => l.replace(/^(\d+[.)]\s*|[-*•]\s*)/, '').trim())
       .filter(Boolean);
 
   return {

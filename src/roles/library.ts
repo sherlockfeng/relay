@@ -122,7 +122,7 @@ export async function searchKnowledge(
   return scored;
 }
 
-function chunkDocument(content: string, filename: string): Array<{ text: string }> {
+export function chunkDocument(content: string, filename: string): Array<{ text: string }> {
   const CHUNK_SIZE = 800;
   const OVERLAP = 100;
   const lines = content.split('\n');
@@ -151,7 +151,7 @@ function chunkDocument(content: string, filename: string): Array<{ text: string 
   return chunks;
 }
 
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   let dot = 0;
   let normA = 0;
   let normB = 0;
