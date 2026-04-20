@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { useGet } from '../hooks/useApi';
-import type { Requirement } from '../types';
+import type { Requirement, RequirementTodo } from '../types';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -154,6 +154,10 @@ export function RequirementDetail() {
                 </div>
               </Section>
             )}
+            <Section title="待办">
+              <TodoList requirementId={req.id} todos={req.todos ?? []} onUpdate={refetch} />
+            </Section>
+
             <Section title="创建时间">
               <p className="text-xs text-slate-400 dark:text-zinc-500">{req.createdAt.slice(0, 16).replace('T', ' ')}</p>
             </Section>
@@ -255,6 +259,110 @@ export function RequirementDetail() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TodoList({ requirementId, todos, onUpdate }: {
+  requirementId: string;
+  todos: RequirementTodo[];
+  onUpdate: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  async function addTodo() {
+    if (!text.trim() || adding) return;
+    setAdding(true);
+    try {
+      await fetch(`/api/requirements/${requirementId}/todos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text.trim() }),
+      });
+      setText('');
+      onUpdate();
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function toggle(todoId: string, done: boolean) {
+    await fetch(`/api/requirements/${requirementId}/todos/${todoId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ done }),
+    });
+    onUpdate();
+  }
+
+  async function remove(todoId: string) {
+    await fetch(`/api/requirements/${requirementId}/todos/${todoId}`, { method: 'DELETE' });
+    onUpdate();
+  }
+
+  const pending = todos.filter((t) => !t.done);
+  const done = todos.filter((t) => t.done);
+
+  return (
+    <div className="flex flex-col gap-2">
+      {pending.map((t) => (
+        <div key={t.id} className="group flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={false}
+            onChange={() => toggle(t.id, true)}
+            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-indigo-600"
+          />
+          <span className="flex-1 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">{t.text}</span>
+          <button
+            onClick={() => remove(t.id)}
+            className="hidden text-slate-300 hover:text-red-400 group-hover:block dark:text-zinc-600"
+          >×</button>
+        </div>
+      ))}
+
+      {done.length > 0 && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-xs text-slate-400 dark:text-zinc-500">
+            已完成 ({done.length})
+          </summary>
+          <div className="mt-1.5 flex flex-col gap-1.5">
+            {done.map((t) => (
+              <div key={t.id} className="group flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={true}
+                  onChange={() => toggle(t.id, false)}
+                  className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-indigo-600"
+                />
+                <span className="flex-1 text-sm leading-relaxed text-slate-400 line-through dark:text-zinc-500">{t.text}</span>
+                <button
+                  onClick={() => remove(t.id)}
+                  className="hidden text-slate-300 hover:text-red-400 group-hover:block dark:text-zinc-600"
+                >×</button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      <div className="flex gap-1.5 pt-1">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addTodo()}
+          placeholder="记录待办…"
+          disabled={adding}
+          className="flex-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+        />
+        <button
+          onClick={addTodo}
+          disabled={!text.trim() || adding}
+          className="rounded bg-indigo-600 px-2 py-1 text-xs text-white hover:bg-indigo-700 disabled:opacity-40"
+        >+</button>
       </div>
     </div>
   );

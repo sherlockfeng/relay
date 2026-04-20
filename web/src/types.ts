@@ -1,3 +1,10 @@
+export interface RequirementTodo {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: string;
+}
+
 export interface Requirement {
   id: string;
   name: string;
@@ -7,6 +14,7 @@ export interface Requirement {
   relatedDocs?: string[];
   changes?: string[];
   tags?: string[];
+  todos?: RequirementTodo[];
   projectPath?: string;
   status: 'draft' | 'confirmed';
   createdAt: string;
