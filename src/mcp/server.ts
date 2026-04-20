@@ -502,7 +502,7 @@ export function createMcpServer(): McpServer {
       chatContext: z.string().optional().describe('Summary of the chat / what was discussed (required for start)'),
       requirementId: z.string().optional().describe('Existing requirement ID — pass to update instead of create'),
       sessionId: z.string().optional().describe('Session ID from start step (required for answer/confirm)'),
-      answers: z.record(z.string()).optional().describe('Answers to clarifying questions (for action=answer)'),
+      answers: z.record(z.string(), z.string()).optional().describe('Answers to clarifying questions (for action=answer)'),
       edits: z.object({
         name: z.string().optional(),
         purpose: z.string().optional(),
