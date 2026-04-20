@@ -1,11 +1,11 @@
 {
-  "name": "agent-forge",
+  "name": "relay",
   "version": "0.1.0",
   "description": "MCP-first multi-agent orchestration platform — spawn, coordinate, and cycle product/dev/test agents automatically",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "agent-forge": "./bin/agent-forge.mjs"
+    "relay": "./bin/relay.mjs"
   },
   "scripts": {
     "dev": "tsup --watch",

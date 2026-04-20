@@ -24,7 +24,7 @@ const ansi = {
 const program = new Command();
 
 program
-  .name('agent-forge')
+  .name('relay')
   .description('MCP-first multi-agent orchestration platform')
   .version('0.1.0');
 
@@ -73,7 +73,7 @@ program
     console.log(`${ansi.green}Seeded${ansi.reset} builtin roles: product, developer, tester`);
     console.log(`\n${ansi.bold}Next steps:${ansi.reset}`);
     console.log(`  1. Edit ${ansi.cyan}${CONFIG_FILE_PATH}${ansi.reset} and set your API key`);
-    console.log(`  2. Add to Claude Code: ${ansi.cyan}claude mcp add agent-forge -- node /path/to/dist/mcp/server.js${ansi.reset}`);
+    console.log(`  2. Add to Claude Code: ${ansi.cyan}claude mcp add relay -- node /path/to/dist/mcp/server.js${ansi.reset}`);
     console.log(`  3. Or add to Cursor's mcp.json`);
   });
 
@@ -110,7 +110,7 @@ program
         const campaigns = db.listCampaigns();
         db.close();
         if (campaigns.length === 0) {
-          console.log(`${ansi.dim}No campaigns yet. Run: agent-forge workflow start <path> <title>${ansi.reset}`);
+          console.log(`${ansi.dim}No campaigns yet. Run: relay workflow start <path> <title>${ansi.reset}`);
           return;
         }
         for (const c of campaigns) {
@@ -171,7 +171,7 @@ program
     const roles = db.listRoles();
     db.close();
     if (roles.length === 0) {
-      console.log(`${ansi.dim}No roles. Run: agent-forge init${ansi.reset}`);
+      console.log(`${ansi.dim}No roles. Run: relay init${ansi.reset}`);
       return;
     }
     for (const r of roles) {

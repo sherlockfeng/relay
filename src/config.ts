@@ -22,7 +22,7 @@ export interface AppConfig {
   };
 }
 
-const CONFIG_DIR = join(homedir(), '.agent-forge');
+const CONFIG_DIR = join(homedir(), '.relay');
 export const CONFIG_FILE_PATH = join(CONFIG_DIR, 'config.json');
 
 export function getConfigDir(): string {
@@ -45,7 +45,7 @@ export function getDefaultConfig(): AppConfig {
     },
     playwright: {
       browser: 'chromium',
-      screenshotDir: join(homedir(), '.agent-forge', 'screenshots'),
+      screenshotDir: join(homedir(), '.relay', 'screenshots'),
     },
   };
 }

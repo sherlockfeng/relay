@@ -1,4 +1,4 @@
-# Agent-Forge 技术设计
+# Relay 技术设计
 
 **状态**：v1.0 — 全量重写  
 **依赖**：Node.js >=20, SQLite
@@ -7,7 +7,7 @@
 
 ## 1. 定位
 
-Agent-Forge 是一个 **MCP-first 多 agent 编排平台**。它不监听 transcript 文件，而是通过 MCP 工具主动进入 Claude Code / Cursor 的 agent 生命周期，注入角色、分发任务、调度循环。
+Relay 是一个 **MCP-first 多 agent 编排平台**。它不监听 transcript 文件，而是通过 MCP 工具主动进入 Claude Code / Cursor 的 agent 生命周期，注入角色、分发任务、调度循环。
 
 核心价值：
 - 把手工复制粘贴的"vibe coding 循环"自动化
@@ -257,7 +257,7 @@ LLM 生成输出：
 ## 8. 目录结构
 
 ```
-agent-forge/
+relay/
 ├── AGENTS.md
 ├── docs/
 │   ├── roles/
@@ -297,7 +297,7 @@ agent-forge/
 │   └── cli/
 │       └── index.ts            ← CLI 入口
 ├── bin/
-│   └── agent-forge.mjs
+│   └── relay.mjs
 ├── web/                        ← Dashboard（可选）
 ├── package.json
 └── tsconfig.json
@@ -307,7 +307,7 @@ agent-forge/
 
 ## 9. 配置
 
-`~/.agent-forge/config.json`：
+`~/.relay/config.json`：
 ```json
 {
   "llm": {
@@ -322,7 +322,7 @@ agent-forge/
   "server": { "port": 3000 },
   "playwright": {
     "browser": "chromium",
-    "screenshotDir": "~/.agent-forge/screenshots"
+    "screenshotDir": "~/.relay/screenshots"
   }
 }
 ```

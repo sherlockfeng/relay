@@ -1,4 +1,4 @@
-# Agent-Forge
+# Relay
 
 **MCP-first multi-agent orchestration platform** — automate the product → dev → test vibe coding loop, manage reusable agent roles, and summarize multi-day campaigns.
 
@@ -17,8 +17,8 @@
 ### 1. 安装
 
 ```bash
-git clone https://github.com/user/agent-forge.git
-cd agent-forge
+git clone https://github.com/user/relay.git
+cd relay
 npm install
 npm run build
 ```
@@ -26,14 +26,14 @@ npm run build
 ### 2. 初始化
 
 ```bash
-node bin/agent-forge.mjs init
-# 编辑 ~/.agent-forge/config.json，填入 ANTHROPIC_API_KEY
+node bin/relay.mjs init
+# 编辑 ~/.relay/config.json，填入 ANTHROPIC_API_KEY
 ```
 
 ### 3. 接入 Claude Code
 
 ```bash
-claude mcp add agent-forge -- node /path/to/agent-forge/dist/mcp/server.js
+claude mcp add relay -- node /path/to/relay/dist/mcp/server.js
 ```
 
 ### 4. 接入 Cursor
@@ -43,9 +43,9 @@ claude mcp add agent-forge -- node /path/to/agent-forge/dist/mcp/server.js
 ```json
 {
   "mcpServers": {
-    "agent-forge": {
+    "relay": {
       "command": "node",
-      "args": ["/path/to/agent-forge/dist/mcp/server.js"]
+      "args": ["/path/to/relay/dist/mcp/server.js"]
     }
   }
 }
@@ -141,13 +141,13 @@ spawn_agent(roleId: "goofy-expert", prompt: "如何在 Goofy 里实现 SSO？")
 ## CLI 命令
 
 ```bash
-agent-forge init                              # 初始化配置 + 种子角色
-agent-forge mcp                               # 启动 MCP server（stdio）
-agent-forge workflow start <path> <title>     # 命令行启动 campaign
-agent-forge workflow list                     # 列出所有 campaign
-agent-forge workflow status <campaignId>      # 查看当前 cycle 进度
-agent-forge roles                             # 列出所有角色
-agent-forge campaign summarize <campaignId>   # 生成 campaign 总结
+relay init                              # 初始化配置 + 种子角色
+relay mcp                               # 启动 MCP server（stdio）
+relay workflow start <path> <title>     # 命令行启动 campaign
+relay workflow list                     # 列出所有 campaign
+relay workflow status <campaignId>      # 查看当前 cycle 进度
+relay roles                             # 列出所有角色
+relay campaign summarize <campaignId>   # 生成 campaign 总结
 ```
 
 ## 技术栈

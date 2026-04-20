@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
-export const DEFAULT_DB_PATH = join(homedir(), '.agent-forge', 'data.db');
+export const DEFAULT_DB_PATH = join(homedir(), '.relay', 'data.db');
 
 let singleton: AgentForgeDB | undefined;
 

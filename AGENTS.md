@@ -1,4 +1,4 @@
-# Agent-Forge — Agent 协作手册
+# Relay — Agent 协作手册
 
 ## 必读文档
 
@@ -48,7 +48,7 @@ init_workflow(projectPath)
 
 ## 角色知识库
 
-预置角色在 `~/.agent-forge/roles/` 下。可通过 `train_role(roleId, docs)` 上传文档/源码训练自定义专家角色（如内部平台专家）。
+预置角色在 `~/.relay/roles/` 下。可通过 `train_role(roleId, docs)` 上传文档/源码训练自定义专家角色（如内部平台专家）。
 
 ## Campaign 记录
 
