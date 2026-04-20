@@ -88,9 +88,9 @@ export function createApiServer(webDistPath?: string) {
     res.json(db.listRoles());
   });
 
-  // SPA fallback
+  // SPA fallback (Express 5 requires named wildcard)
   if (webDistPath && existsSync(webDistPath)) {
-    app.get('*', (_req, res) => {
+    app.get('/{*path}', (_req, res) => {
       res.sendFile(join(webDistPath, 'index.html'));
     });
   }
