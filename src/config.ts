@@ -4,24 +4,25 @@ import { dirname, join } from 'node:path';
 
 export interface AppConfig {
   llm: {
-    provider: string;
+    provider: 'anthropic' | 'openai';
     model: string;
     apiKey: string;
+    embeddingModel?: string;
   };
-  platforms: {
-    cursor: boolean;
-    'claude-code': boolean;
-    codex: boolean;
+  spawner: {
+    mode: 'sdk' | 'cli';
+    fallbackToCli: boolean;
   };
   server: {
     port: number;
   };
-  notifications: {
-    enabled: boolean;
+  playwright: {
+    browser: 'chromium' | 'firefox' | 'webkit';
+    screenshotDir: string;
   };
 }
 
-const CONFIG_DIR = join(homedir(), '.ai-chat-digest');
+const CONFIG_DIR = join(homedir(), '.agent-forge');
 export const CONFIG_FILE_PATH = join(CONFIG_DIR, 'config.json');
 
 export function getConfigDir(): string {
@@ -31,20 +32,20 @@ export function getConfigDir(): string {
 export function getDefaultConfig(): AppConfig {
   return {
     llm: {
-      provider: 'openai',
-      model: 'gpt-4o-mini',
-      apiKey: '',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      apiKey: process.env.ANTHROPIC_API_KEY ?? '',
     },
-    platforms: {
-      cursor: true,
-      'claude-code': true,
-      codex: true,
+    spawner: {
+      mode: 'sdk',
+      fallbackToCli: true,
     },
     server: {
       port: 3000,
     },
-    notifications: {
-      enabled: true,
+    playwright: {
+      browser: 'chromium',
+      screenshotDir: join(homedir(), '.agent-forge', 'screenshots'),
     },
   };
 }
@@ -54,32 +55,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function mergeConfig(base: AppConfig, partial: unknown): AppConfig {
-  if (!isRecord(partial)) {
-    return base;
-  }
-
+  if (!isRecord(partial)) return base;
   const out: AppConfig = structuredClone(base);
 
   if (isRecord(partial.llm)) {
     const llm = partial.llm;
-    if (typeof llm.provider === 'string') out.llm.provider = llm.provider;
+    if (llm.provider === 'anthropic' || llm.provider === 'openai') out.llm.provider = llm.provider;
     if (typeof llm.model === 'string') out.llm.model = llm.model;
     if (typeof llm.apiKey === 'string') out.llm.apiKey = llm.apiKey;
+    if (typeof llm.embeddingModel === 'string') out.llm.embeddingModel = llm.embeddingModel;
   }
 
-  if (isRecord(partial.platforms)) {
-    const p = partial.platforms;
-    if (typeof p.cursor === 'boolean') out.platforms.cursor = p.cursor;
-    if (typeof p['claude-code'] === 'boolean') out.platforms['claude-code'] = p['claude-code'];
-    if (typeof p.codex === 'boolean') out.platforms.codex = p.codex;
+  if (isRecord(partial.spawner)) {
+    const s = partial.spawner;
+    if (s.mode === 'sdk' || s.mode === 'cli') out.spawner.mode = s.mode;
+    if (typeof s.fallbackToCli === 'boolean') out.spawner.fallbackToCli = s.fallbackToCli;
   }
 
   if (isRecord(partial.server) && typeof partial.server.port === 'number') {
     out.server.port = partial.server.port;
   }
 
-  if (isRecord(partial.notifications) && typeof partial.notifications.enabled === 'boolean') {
-    out.notifications.enabled = partial.notifications.enabled;
+  if (isRecord(partial.playwright)) {
+    const p = partial.playwright;
+    if (p.browser === 'chromium' || p.browser === 'firefox' || p.browser === 'webkit') {
+      out.playwright.browser = p.browser;
+    }
+    if (typeof p.screenshotDir === 'string') out.playwright.screenshotDir = p.screenshotDir;
   }
 
   return out;
@@ -87,13 +89,10 @@ function mergeConfig(base: AppConfig, partial: unknown): AppConfig {
 
 export function loadConfig(): AppConfig {
   const defaults = getDefaultConfig();
-  if (!existsSync(CONFIG_FILE_PATH)) {
-    return defaults;
-  }
+  if (!existsSync(CONFIG_FILE_PATH)) return defaults;
   try {
     const raw = readFileSync(CONFIG_FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    return mergeConfig(defaults, parsed);
+    return mergeConfig(defaults, JSON.parse(raw) as unknown);
   } catch {
     return defaults;
   }
@@ -101,8 +100,6 @@ export function loadConfig(): AppConfig {
 
 export function saveConfig(config: AppConfig): void {
   const dir = dirname(CONFIG_FILE_PATH);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(CONFIG_FILE_PATH, JSON.stringify(config, null, 2), 'utf8');
 }

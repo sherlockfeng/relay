@@ -1,153 +1,170 @@
-# AI Chat Digest
+# Agent-Forge
 
-**AI Chat Management Dashboard** — Monitor, Digest, Recall your AI conversations.
-
-一个本地 Web Dashboard，统一管理你与 Cursor / Claude Code / Codex 的所有对话。后台自动监控 chat 状态，chat 结束自动生成结构化总结并打 tag，支持按 tag 聚合、全文搜索、查找相似对话。
+**MCP-first multi-agent orchestration platform** — automate the product → dev → test vibe coding loop, manage reusable agent roles, and summarize multi-day campaigns.
 
 ## 核心能力
 
 | 能力 | 说明 |
 |------|------|
-| **Monitor** | 实时监控所有 AI chat 运行状态 + 系统通知 |
-| **Digest** | Chat 结束自动总结、自动打 tag、知识沉淀 |
-| **Recall** | 按 tag 聚合、全文搜索、找相似历史对话 |
+| **Vibe Coding Loop** | 自动化 product→dev→test 循环，agent 之间任务传递无需手工复制粘贴 |
+| **Role Library** | 内置产品/研发/测试角色，支持上传文档训练自定义专家（如内部平台专家） |
+| **Doc-First 强制** | `update_doc_first()` 写文档返回审计 token，dev 任务不附 token 无法完成 |
+| **Campaign Summary** | 多天大需求结束后，跨 cycle 总结：为什么做、做了什么、整体演进路径 |
+| **MCP 集成** | 接入 Claude Code / Cursor，agent 直接调用工具启动循环、生成子 agent |
 
 ## 快速开始
 
 ### 1. 安装
 
 ```bash
-git clone https://github.com/user/ai-chat-digest.git
-cd ai-chat-digest
+git clone https://github.com/user/agent-forge.git
+cd agent-forge
 npm install
-cd web && npm install && cd ..
-```
-
-### 2. 配置
-
-```bash
-mkdir -p ~/.ai-chat-digest
-cat > ~/.ai-chat-digest/config.json << 'EOF'
-{
-  "llm": {
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "apiKey": "sk-your-key-here"
-  },
-  "platforms": {
-    "cursor": { "enabled": true },
-    "claude-code": { "enabled": true },
-    "codex": { "enabled": true }
-  },
-  "server": { "port": 3000 },
-  "notifications": { "enabled": true }
-}
-EOF
-```
-
-支持的 LLM provider: `openai`、`anthropic`
-
-### 3. 构建 & 启动
-
-```bash
 npm run build
-node bin/ai-chat-digest.mjs start
 ```
 
-打开浏览器访问 `http://localhost:3000`
+### 2. 初始化
 
-## 接入 AI 工具
+```bash
+node bin/agent-forge.mjs init
+# 编辑 ~/.agent-forge/config.json，填入 ANTHROPIC_API_KEY
+```
 
-### Cursor（MCP Server）
+### 3. 接入 Claude Code
 
-在 `~/.cursor/mcp.json` 中添加:
+```bash
+claude mcp add agent-forge -- node /path/to/agent-forge/dist/mcp/server.js
+```
+
+### 4. 接入 Cursor
+
+在 `~/.cursor/mcp.json` 添加：
 
 ```json
 {
   "mcpServers": {
-    "ai-chat-digest": {
+    "agent-forge": {
       "command": "node",
-      "args": ["/path/to/ai-chat-digest/dist/mcp/server.js"]
+      "args": ["/path/to/agent-forge/dist/mcp/server.js"]
     }
   }
 }
 ```
 
-### Claude Code
+## Vibe Coding 循环
 
-```bash
-claude mcp add ai-chat-digest -- node /path/to/ai-chat-digest/dist/mcp/server.js
+在任意 AI agent 中调用 MCP tools：
+
+```
+# 1. 启动 campaign
+init_workflow(projectPath: "/my/project", title: "登录页重设计", brief: "用户反馈登录体验差")
+
+# 2. 产品 agent 自动激活
+get_cycle_state(campaignId: "...")          # 读上轮截图 + 状态
+update_doc_first("docs/product/PRD.md", content)
+create_tasks(cycleId: "...", tasks: [...])  # 输出研发+测试任务
+
+# 3. 研发 agent 激活
+get_my_tasks(cycleId: "...", role: "dev")
+update_doc_first("docs/tech/DESIGN.md", content)  # 返回 auditToken
+complete_task(taskId: "...", result: "...", docAuditToken: "...")
+
+# 4. 测试 agent 激活
+get_my_tasks(cycleId: "...", role: "test")
+run_e2e_tests(cycleId: "...")              # 跑 Playwright，自动截图
+complete_cycle(cycleId: "...")             # 触发下一轮
+
+# 5. 多天后总结
+summarize_campaign(campaignId: "...")
 ```
 
-### Codex
+## 角色管理
 
-在 `~/.codex/config.toml` 中添加:
+### 内置角色
 
-```toml
-[mcp_servers.ai-chat-digest]
-command = "node"
-args = ["/path/to/ai-chat-digest/dist/mcp/server.js"]
+| 角色 ID | 职责 |
+|---------|------|
+| `product` | 分析截图 + 竞品，生成任务列表 |
+| `developer` | doc-first 实现，不超出任务范围 |
+| `tester` | 攻击性 e2e 测试，强制覆盖边界条件 |
+
+### 训练自定义角色
+
 ```
+# 在 Claude Code / Cursor 中：
+train_role(
+  roleId: "goofy-expert",
+  name: "Goofy Platform Expert",
+  documents: [
+    { filename: "goofy-api.md", content: "..." },
+    { filename: "goofy-patterns.ts", content: "..." }
+  ]
+)
+
+# 之后 spawn 时自动注入知识库上下文
+spawn_agent(roleId: "goofy-expert", prompt: "如何在 Goofy 里实现 SSO？")
+```
+
+## MCP Tools 完整列表
+
+### 工作流
+- `init_workflow` — 创建 campaign，启动第一个 cycle
+- `get_cycle_state` — 读当前 cycle 状态 + 截图
+- `complete_cycle` — 测试完成，触发下一轮
+
+### 任务
+- `create_tasks` — 产品 agent 生成任务列表
+- `get_my_tasks` — 按角色拉取任务
+- `complete_task` — 完成任务（dev 需附 docAuditToken）
+- `add_task_comment` — 对任务提问
+- `create_bug_tasks` — 测试报 bug，回退到 dev 阶段
+- `add_product_feedback` — 测试向产品反馈设计问题
+
+### 文档强制
+- `update_doc_first` — 写文档，返回 auditToken
+
+### 角色
+- `list_roles` / `get_role` — 查看角色
+- `train_role` — 上传文档/源码训练角色
+- `search_knowledge` — RAG 查询角色知识库
+
+### Agent 调度
+- `spawn_agent` — 用指定角色启动子 agent（Anthropic SDK）
+
+### 截图 & 测试
+- `capture_screenshot` — 附加截图到 cycle
+- `run_e2e_tests` — 触发 Playwright
+
+### Campaign
+- `list_campaigns` / `summarize_campaign` — 列出 / 总结大需求
 
 ## CLI 命令
 
 ```bash
-ai-chat-digest start              # 启动守护进程 + Web Dashboard
-ai-chat-digest stop               # 停止
-ai-chat-digest status             # 查看运行状态
-ai-chat-digest summarize [id]     # 手动总结
-ai-chat-digest search "关键词"     # 搜索历史总结
-ai-chat-digest tags               # 列出所有 tags
-ai-chat-digest open               # 打开 Dashboard
-```
-
-## MCP Tools
-
-接入后，AI 工具可使用以下 tools 查询历史知识:
-
-- `search_summaries` — 全文搜索历史总结
-- `get_similar_chats` — 查找相似对话
-- `get_tag_summaries` — 按 tag 查看总结
-- `get_summary` — 获取完整总结
-- `list_tags` — 列出所有 tags
-
-## 支持平台
-
-| 平台 | Transcript 路径 |
-|------|-----------------|
-| Cursor | `~/.cursor/projects/*/agent-transcripts/` |
-| Claude Code | `~/.claude/projects/*/` |
-| Codex | `~/.codex/sessions/` |
-
-## 开发
-
-```bash
-# 启动后端 (watch mode)
-npx tsup --watch
-
-# 启动前端 (dev server, 会代理 API 到 :3000)
-cd web && npm run dev
-
-# 类型检查
-npm run typecheck
-
-# 构建
-npm run build
+agent-forge init                              # 初始化配置 + 种子角色
+agent-forge mcp                               # 启动 MCP server（stdio）
+agent-forge workflow start <path> <title>     # 命令行启动 campaign
+agent-forge workflow list                     # 列出所有 campaign
+agent-forge workflow status <campaignId>      # 查看当前 cycle 进度
+agent-forge roles                             # 列出所有角色
+agent-forge campaign summarize <campaignId>   # 生成 campaign 总结
 ```
 
 ## 技术栈
 
-- **Backend**: TypeScript, Express, WebSocket, better-sqlite3 (FTS5), chokidar
-- **Frontend**: React, Vite, TailwindCSS
-- **LLM**: OpenAI / Anthropic SDK
-- **Integration**: MCP (Model Context Protocol)
+- **MCP**: `@modelcontextprotocol/sdk` — 接入 Claude Code / Cursor
+- **Agent 调用**: `@anthropic-ai/sdk` streaming — 直接进入 agent 生命周期
+- **存储**: `better-sqlite3` — campaigns / cycles / tasks / roles / knowledge
+- **e2e**: Playwright — 测试 agent 自动截图
+- **Build**: tsup + TypeScript
 
 ## 文档
 
-- [产品需求](docs/product/PRD.md)
-- [技术设计](docs/tech/DESIGN.md)
-- [测试策略](docs/test/TEST_STRATEGY.md)
-- [协作日志](docs/collab/LOG.md)
+- [AGENTS.md](AGENTS.md) — agent 必读，角色规则
+- [docs/roles/product.md](docs/roles/product.md) — 产品角色
+- [docs/roles/developer.md](docs/roles/developer.md) — 研发角色
+- [docs/roles/tester.md](docs/roles/tester.md) — 测试角色
+- [docs/tech/DESIGN.md](docs/tech/DESIGN.md) — 技术设计
 
 ## License
 
