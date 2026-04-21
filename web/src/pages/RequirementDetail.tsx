@@ -126,16 +126,13 @@ export function RequirementDetail() {
 
           {req.changes && req.changes.length > 0 && (
             <ContentSection title="主要改动">
-              <ol className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3">
                 {req.changes.map((c, i) => (
-                  <li key={i} className="flex gap-3">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-                      {i + 1}
-                    </span>
-                    <span className="text-sm leading-relaxed text-slate-700 dark:text-zinc-300">{c}</span>
-                  </li>
+                  <div key={i} className="border-l-2 border-indigo-200 pl-4 dark:border-indigo-800">
+                    <Prose>{c}</Prose>
+                  </div>
                 ))}
-              </ol>
+              </div>
             </ContentSection>
           )}
         </div>

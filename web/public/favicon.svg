@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#4f46e5"/>
+  <!-- center hub -->
+  <circle cx="16" cy="16" r="3" fill="white"/>
+  <!-- spoke nodes -->
+  <circle cx="16" cy="6"  r="2" fill="white" opacity="0.85"/>
+  <circle cx="24" cy="11" r="2" fill="white" opacity="0.85"/>
+  <circle cx="24" cy="21" r="2" fill="white" opacity="0.85"/>
+  <circle cx="16" cy="26" r="2" fill="white" opacity="0.85"/>
+  <circle cx="8"  cy="21" r="2" fill="white" opacity="0.85"/>
+  <circle cx="8"  cy="11" r="2" fill="white" opacity="0.85"/>
+  <!-- spokes -->
+  <line x1="16" y1="13" x2="16" y2="8"  stroke="white" stroke-width="1.5" stroke-opacity="0.6"/>
+  <line x1="18.6" y1="14.5" x2="22.3" y2="12.5" stroke="white" stroke-width="1.5" stroke-opacity="0.6"/>
+  <line x1="18.6" y1="17.5" x2="22.3" y2="19.5" stroke="white" stroke-width="1.5" stroke-opacity="0.6"/>
+  <line x1="16" y1="19" x2="16" y2="24" stroke="white" stroke-width="1.5" stroke-opacity="0.6"/>
+  <line x1="13.4" y1="17.5" x2="9.7" y2="19.5" stroke="white" stroke-width="1.5" stroke-opacity="0.6"/>
+  <line x1="13.4" y1="14.5" x2="9.7" y2="12.5" stroke="white" stroke-width="1.5" stroke-opacity="0.6"/>
+</svg>
