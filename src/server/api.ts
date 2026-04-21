@@ -153,27 +153,28 @@ export function createApiServer(webDistPath?: string) {
       .map((m) => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`)
       .join('\n\n');
 
-    const systemPrompt = `你是一个需求文档维护助手。根据用户与 AI 的对话，提取其中对需求文档有价值的新信息，并以 JSON 格式返回需要更新的字段。
+    // Only these fields can be updated via chat — purpose/name are immutable from chat
+    const ALLOWED_CHAT_FIELDS = ['context', 'summary', 'changes'] as const;
 
-当前需求文档：
-名称：${requirement.name}
-目的：${requirement.purpose ?? ''}
-摘要：${requirement.summary ?? ''}
-主要改动：${(requirement.changes ?? []).join('\n')}
-上下文：${(requirement.context ?? '').slice(0, 1000)}
+    const systemPrompt = `你是一个需求文档维护助手。根据用户与 AI 的对话，提取其中有价值的新信息，只更新以下三个字段：context、summary、changes。
 
-规则：
-- 只返回纯 JSON 对象，不要 markdown 代码块，不要任何解释文字，不要换行符之外的转义
-- 只包含有实质新增信息的字段，没有新信息的字段不要包含
-- context 字段：把对话中补充的背景信息追加到现有 context 末尾（用两个换行分隔），不要替换原内容
-- summary 字段：如果对话澄清了摘要，可以更新
-- changes 字段：如果对话新增了改动点，只返回新增的条目（数组），不要包含已有内容
-- 如果对话没有任何有价值的新信息可以更新，返回 {}
+当前需求摘要：${requirement.summary ?? '（暂无）'}
+当前主要改动：${(requirement.changes ?? []).join('；') || '（暂无）'}
+当前上下文（前500字）：${(requirement.context ?? '').slice(0, 500)}
+
+规则（严格遵守）：
+- 只返回纯 JSON，不要 markdown 代码块，不要解释文字
+- 只允许出现 context、summary、changes 三个 key，其他字段一律不输出
+- context：把对话中新增的背景信息追加到末尾（两个换行分隔原有内容），禁止替换原内容
+- summary：直接写完整的新摘要正文（Markdown），禁止写"目的：不变"/"改动：xx"之类 diff 描述
+- changes：仅返回本次新增的改动条目（字符串数组），禁止包含已有内容
+- 没有新信息则返回 {}
+- 任何字段的值都禁止出现"不变""无变化""unchanged""same"等占位词
 
 返回格式示例：
 {
   "context": "原有内容\\n\\n新增：TLB 接入判断逻辑是...",
-  "summary": "更新后的摘要",
+  "summary": "更新后的摘要正文",
   "changes": ["新改动1", "新改动2"]
 }`;
 
@@ -203,6 +204,13 @@ export function createApiServer(webDistPath?: string) {
         res.json({ updated: false, message: '对话中没有发现需要更新的新信息' });
         return;
       }
+      // Whitelist: only allow context/summary/changes, drop everything else
+      for (const key of Object.keys(updates)) {
+        if (!(ALLOWED_CHAT_FIELDS as readonly string[]).includes(key)) {
+          delete updates[key];
+        }
+      }
+
       // Strip placeholder values AI sometimes returns for "no change" fields
       const NO_CHANGE_MARKERS = /^(不变|无变化|同上|unchanged|no change|n\/a|same|保持不变|无|-)$/i;
       for (const key of Object.keys(updates)) {
