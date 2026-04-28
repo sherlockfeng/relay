@@ -2,6 +2,7 @@ import { NavLink, Route, Routes } from 'react-router-dom';
 
 import { Requirements } from './pages/Requirements';
 import { RequirementDetail } from './pages/RequirementDetail';
+import { Roles } from './pages/Roles';
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-lg px-3 py-2 text-sm font-medium transition ${
@@ -24,6 +25,9 @@ export default function App() {
           <NavLink to="/" end className={navClass}>
             需求库
           </NavLink>
+          <NavLink to="/roles" className={navClass}>
+            专家库
+          </NavLink>
         </nav>
       </aside>
       <main className="min-w-0 flex-1 overflow-auto p-6 md:p-10">
@@ -31,6 +35,7 @@ export default function App() {
           <Route path="/" element={<Requirements />} />
           <Route path="/requirements" element={<Requirements />} />
           <Route path="/requirements/:id" element={<RequirementDetail />} />
+          <Route path="/roles" element={<Roles />} />
         </Routes>
       </main>
     </div>
