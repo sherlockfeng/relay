@@ -38,50 +38,77 @@ export class AgentSpawner {
   private async spawnViaSdk(input: SpawnAgentInput): Promise<SpawnAgentResult> {
     const role = getRole(this.db, input.roleId);
 
-    // RAG: retrieve relevant knowledge chunks if the role has a knowledge base
-    const knowledgeContext = await this.buildKnowledgeContext(input.roleId, input.prompt);
+    // Inject all knowledge chunks directly — full context is more reliable than top-5 RAG
+    // for small knowledge bases (< ~100 chunks). Falls back to RAG for larger bases.
+    const chunks = this.db.getChunksForRole(input.roleId);
+    let knowledgeContext = '';
+    if (chunks.length > 0 && chunks.length <= 80) {
+      knowledgeContext = chunks
+        .map((c) => `Source: ${c.sourceFile ?? 'unknown'}\n${c.chunkText}`)
+        .join('\n\n---\n\n');
+    } else if (chunks.length > 80) {
+      knowledgeContext = await this.buildKnowledgeContext(input.roleId, input.prompt);
+    }
 
     const systemParts = [role.systemPrompt];
     if (knowledgeContext) {
-      systemParts.push(`\n\n## Relevant Knowledge\n${knowledgeContext}`);
+      systemParts.push(`\n\n## Knowledge Base\n${knowledgeContext}`);
     }
     if (input.context) {
       systemParts.push(`\n\n## Additional Context\n${input.context}`);
     }
 
-    const stream = await this.client.messages.stream({
-      model: this.config.llm.model,
-      system: systemParts.join(''),
-      messages: [{ role: 'user', content: input.prompt }],
-      tools: input.tools ?? [],
-      max_tokens: 8096,
-    });
-
-    const toolCalls: SpawnAgentResult['toolCalls'] = [];
-    let fullText = '';
-
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta') {
-        if (event.delta.type === 'text_delta') {
-          fullText += event.delta.text;
-        }
+    // Retry up to 3 times on 5xx / network errors with exponential backoff
+    const MAX_RETRIES = 3;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay = 1000 * 2 ** (attempt - 1); // 1s, 2s
+        await new Promise((r) => setTimeout(r, delay));
       }
-      if (event.type === 'content_block_start') {
-        if (event.content_block.type === 'tool_use') {
-          toolCalls.push({
-            name: event.content_block.name,
-            input: event.content_block.input,
-          });
+      try {
+        const stream = await this.client.messages.stream({
+          model: this.config.llm.model,
+          system: systemParts.join(''),
+          messages: [{ role: 'user', content: input.prompt }],
+          tools: input.tools ?? [],
+          max_tokens: 4096,
+        });
+
+        const toolCalls: SpawnAgentResult['toolCalls'] = [];
+        let fullText = '';
+
+        for await (const event of stream) {
+          if (event.type === 'content_block_delta') {
+            if (event.delta.type === 'text_delta') {
+              fullText += event.delta.text;
+            }
+          }
+          if (event.type === 'content_block_start') {
+            if (event.content_block.type === 'tool_use') {
+              toolCalls.push({
+                name: event.content_block.name,
+                input: event.content_block.input,
+              });
+            }
+          }
         }
+
+        const finalMessage = await stream.finalMessage();
+        return {
+          text: fullText,
+          toolCalls,
+          stopReason: finalMessage.stop_reason ?? 'end_turn',
+        };
+      } catch (err: unknown) {
+        const status = (err as { status?: number }).status;
+        // Only retry on server-side / transient errors (5xx)
+        if (status && status < 500) throw err;
+        lastErr = err;
+        console.warn(`[spawner] attempt ${attempt + 1} failed (status=${status}), retrying…`);
       }
     }
-
-    const finalMessage = await stream.finalMessage();
-    return {
-      text: fullText,
-      toolCalls,
-      stopReason: finalMessage.stop_reason ?? 'end_turn',
-    };
+    throw lastErr;
   }
 
   private spawnViaCli(input: SpawnAgentInput): Promise<SpawnAgentResult> {
