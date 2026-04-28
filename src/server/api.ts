@@ -268,6 +268,25 @@ export function createApiServer(webDistPath?: string) {
     res.json(db.listRoles());
   });
 
+  app.get('/api/roles/:id/chunks', (req, res) => {
+    const role = db.getRole(req.params.id);
+    if (!role) { res.status(404).json({ error: 'Not found' }); return; }
+    const chunks = db.getChunksForRole(req.params.id).map((c) => ({
+      id: c.id,
+      sourceFile: c.sourceFile,
+      chunkText: c.chunkText,
+      createdAt: c.createdAt,
+    }));
+    // Group by sourceFile
+    const grouped: Record<string, { chunkText: string; id: string }[]> = {};
+    for (const c of chunks) {
+      const key = c.sourceFile ?? '(未知来源)';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push({ id: c.id, chunkText: c.chunkText });
+    }
+    res.json({ total: chunks.length, sources: grouped });
+  });
+
   // SPA fallback (Express 5 requires named wildcard)
   if (webDistPath && existsSync(webDistPath)) {
     app.get('/{*path}', (_req, res) => {
