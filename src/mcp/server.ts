@@ -14,6 +14,10 @@ import { summarizeCampaign } from '../summarizer/campaign.js';
 import { startCapture, submitAnswers, confirmCapture } from '../requirements/capture.js';
 import { recallRequirements, formatRequirementForInjection } from '../requirements/recall.js';
 
+export function createRelayChatSessionId(): string {
+  return `relay-chat-${randomUUID()}`;
+}
+
 export function createMcpServer(): McpServer {
   const config = loadConfig();
   const db = getDatabase();
@@ -251,15 +255,44 @@ export function createMcpServer(): McpServer {
 
   // ── Spawner ─────────────────────────────────────────────────────────────────
 
+  server.registerTool('start_relay_chat_session', {
+    description: 'Create a Relay chat session id for the current Cursor/Claude chat. Call this once before using spawn_agent without an existing sessionId.',
+    inputSchema: {
+      purpose: z.string().optional().describe('Optional short description of why this chat needs Relay experts'),
+    },
+  }, async ({ purpose }) => {
+    const sessionId = createRelayChatSessionId();
+    return {
+      content: [{ type: 'text', text: JSON.stringify({
+        sessionId,
+        purpose,
+        nextStep: 'Call spawn_agent with this sessionId. Reuse it for all Relay expert calls in this chat.',
+      }, null, 2) }],
+    };
+  });
+
   server.registerTool('spawn_agent', {
-    description: "Spawn a sub-agent with a specific role. System prompt + knowledge context are injected automatically.",
+    description: "Spawn a sub-agent with a specific role. Defaults to Cursor local agent session reuse. If you do not have a sessionId for this chat, first call start_relay_chat_session, then retry spawn_agent with that sessionId. Use provider=\"anthropic\" only when explicitly requested.",
     inputSchema: {
       roleId: z.string(),
       prompt: z.string(),
       context: z.string().optional(),
+      provider: z.enum(['anthropic', 'cursor']).optional(),
+      sessionId: z.string().optional(),
     },
-  }, async ({ roleId, prompt, context }) => {
-    const result = await spawner.spawnAgent({ roleId, prompt, context });
+  }, async ({ roleId, prompt, context, provider, sessionId }) => {
+    const effectiveProvider = provider ?? 'cursor';
+    if (effectiveProvider === 'cursor' && !sessionId) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          requiresSession: true,
+          message: 'Relay expert calls now default to Cursor Agent session reuse. Call start_relay_chat_session once for this chat, then retry spawn_agent with the returned sessionId.',
+          nextTool: 'start_relay_chat_session',
+        }, null, 2) }],
+      };
+    }
+
+    const result = await spawner.spawnAgent({ roleId, prompt, context, provider: effectiveProvider, sessionId });
     return {
       content: [{ type: 'text', text: JSON.stringify({
         stopReason: result.stopReason, toolCallCount: result.toolCalls.length,

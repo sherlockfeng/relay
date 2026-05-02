@@ -4,12 +4,15 @@ import type { AgentForgeDB } from '../storage/database.js';
 import { getRole } from '../roles/library.js';
 import { searchKnowledge } from '../roles/library.js';
 import type { AppConfig } from '../config.js';
+import type { SDKAgent } from '@cursor/sdk';
 
 export interface SpawnAgentInput {
   roleId: string;
   prompt: string;
   context?: string;
   tools?: Anthropic.Messages.Tool[];
+  provider?: 'anthropic' | 'cursor';
+  sessionId?: string;
 }
 
 export interface SpawnAgentResult {
@@ -18,17 +21,43 @@ export interface SpawnAgentResult {
   stopReason: string;
 }
 
+export interface CursorAgentOptions {
+  apiKey: string;
+  model: string;
+  workspacePath: string;
+}
+
+export interface CursorAgentLike {
+  id: string;
+  send(prompt: string): Promise<string>;
+}
+
+export interface CursorRuntime {
+  create(options: CursorAgentOptions): Promise<CursorAgentLike>;
+  resume(agentId: string, options: CursorAgentOptions): Promise<CursorAgentLike>;
+}
+
+export interface AgentSpawnerDeps {
+  cursorRuntime?: CursorRuntime;
+}
+
 export class AgentSpawner {
   private client: Anthropic;
+  private cursorRuntime: CursorRuntime;
 
   constructor(
     private readonly db: AgentForgeDB,
     private readonly config: AppConfig,
+    deps: AgentSpawnerDeps = {},
   ) {
     this.client = new Anthropic({ apiKey: config.llm.apiKey });
+    this.cursorRuntime = deps.cursorRuntime ?? new CursorSdkRuntime();
   }
 
   async spawnAgent(input: SpawnAgentInput): Promise<SpawnAgentResult> {
+    if (input.provider !== 'anthropic') {
+      return this.spawnViaCursor(input);
+    }
     if (this.config.spawner.mode === 'cli') {
       return this.spawnViaCli(input);
     }
@@ -111,6 +140,44 @@ export class AgentSpawner {
     throw lastErr;
   }
 
+  private async spawnViaCursor(input: SpawnAgentInput): Promise<SpawnAgentResult> {
+    if (!input.sessionId) {
+      throw new Error('sessionId is required when provider is "cursor"');
+    }
+    const cursorConfig = this.getCursorConfig();
+    if (!cursorConfig.apiKey) {
+      throw new Error('Cursor provider requires cursor.apiKey in ~/.relay/config.json or CURSOR_API_KEY');
+    }
+
+    const role = getRole(this.db, input.roleId);
+    const options: CursorAgentOptions = {
+      apiKey: cursorConfig.apiKey,
+      model: cursorConfig.model,
+      workspacePath: cursorConfig.workspacePath,
+    };
+
+    const existing = this.db.getAgentSession('cursor', input.roleId, input.sessionId);
+    let agent: CursorAgentLike;
+    if (existing) {
+      agent = await this.cursorRuntime.resume(existing.externalId, options);
+    } else {
+      agent = await this.cursorRuntime.create(options);
+      await agent.send(this.buildCursorInitializationPrompt(input.roleId, role.systemPrompt, input.context));
+      const now = new Date().toISOString();
+      this.db.upsertAgentSession({
+        provider: 'cursor',
+        roleId: input.roleId,
+        sessionId: input.sessionId,
+        externalId: agent.id,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const text = await agent.send(input.prompt);
+    return { text, toolCalls: [], stopReason: 'end_turn' };
+  }
+
   private spawnViaCli(input: SpawnAgentInput): Promise<SpawnAgentResult> {
     const role = getRole(this.db, input.roleId);
     return new Promise((resolve, reject) => {
@@ -158,10 +225,77 @@ export class AgentSpawner {
       .join('\n\n---\n\n');
   }
 
+  private buildFullKnowledgeContext(roleId: string): string {
+    const chunks = this.db.getChunksForRole(roleId);
+    return chunks
+      .map((c) => `Source: ${c.sourceFile ?? 'unknown'}\n${c.chunkText}`)
+      .join('\n\n---\n\n');
+  }
+
+  private buildCursorInitializationPrompt(roleId: string, systemPrompt: string, context?: string): string {
+    const sections = [
+      `You are being initialized as the Relay expert role "${roleId}".`,
+      `## Role System Prompt\n${systemPrompt}`,
+    ];
+    const knowledgeContext = this.buildFullKnowledgeContext(roleId);
+    if (knowledgeContext) {
+      sections.push(`## Knowledge Base\n${knowledgeContext}`);
+    }
+    if (context) {
+      sections.push(`## Additional Context\n${context}`);
+    }
+    sections.push('Keep this role and knowledge context for the rest of this agent session. Reply with a brief acknowledgement only.');
+    return sections.join('\n\n');
+  }
+
+  private getCursorConfig(): CursorAgentOptions {
+    return {
+      apiKey: this.config.cursor?.apiKey ?? process.env.CURSOR_API_KEY ?? '',
+      model: this.config.cursor?.model ?? 'composer-2',
+      workspacePath: this.config.cursor?.workspacePath ?? process.cwd(),
+    };
+  }
+
   private async callEmbeddingApi(text: string): Promise<Float32Array> {
     // Placeholder: real implementation would call an embedding endpoint
     return hashEmbed(text);
   }
+}
+
+class CursorSdkRuntime implements CursorRuntime {
+  async create(options: CursorAgentOptions): Promise<CursorAgentLike> {
+    const { Agent } = await import('@cursor/sdk');
+    const agent = await Agent.create({
+      apiKey: options.apiKey,
+      model: { id: options.model },
+      local: { cwd: options.workspacePath },
+    });
+    return wrapCursorAgent(agent);
+  }
+
+  async resume(agentId: string, options: CursorAgentOptions): Promise<CursorAgentLike> {
+    const { Agent } = await import('@cursor/sdk');
+    const agent = await Agent.resume(agentId, {
+      apiKey: options.apiKey,
+      model: { id: options.model },
+      local: { cwd: options.workspacePath },
+    });
+    return wrapCursorAgent(agent);
+  }
+}
+
+function wrapCursorAgent(agent: SDKAgent): CursorAgentLike {
+  return {
+    id: agent.agentId,
+    async send(prompt: string): Promise<string> {
+      const run = await agent.send(prompt);
+      const result = await run.wait();
+      if (result.status === 'error') {
+        throw new Error(`Cursor agent run failed: ${run.id}`);
+      }
+      return result.result ?? '';
+    },
+  };
 }
 
 /** Deterministic pseudo-embedding using character frequency (dev fallback only). */
