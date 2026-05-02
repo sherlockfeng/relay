@@ -110,6 +110,15 @@ export interface DocAuditEntry {
   createdAt: string;
 }
 
+export interface AgentSession {
+  provider: string;
+  roleId: string;
+  sessionId: string;
+  externalId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   if (raw == null || raw === '') return fallback;
   try {
@@ -171,6 +180,17 @@ function rowToRole(row: Record<string, unknown>): Role {
     docPath: row.doc_path ? String(row.doc_path) : undefined,
     isBuiltin: Boolean(row.is_builtin),
     createdAt: String(row.created_at),
+  };
+}
+
+function rowToAgentSession(row: Record<string, unknown>): AgentSession {
+  return {
+    provider: String(row.provider),
+    roleId: String(row.role_id),
+    sessionId: String(row.session_id),
+    externalId: String(row.external_id),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
   };
 }
 
@@ -242,6 +262,16 @@ export class AgentForgeDB {
         created_at  TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+        provider    TEXT NOT NULL,
+        role_id     TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        session_id  TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        PRIMARY KEY (provider, role_id, session_id)
+      );
+
       CREATE TABLE IF NOT EXISTS doc_audit_log (
         token        TEXT PRIMARY KEY,
         task_id      TEXT,
@@ -279,6 +309,7 @@ export class AgentForgeDB {
       CREATE INDEX IF NOT EXISTS idx_tasks_cycle ON tasks(cycle_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_role ON tasks(role, status);
       CREATE INDEX IF NOT EXISTS idx_chunks_role ON knowledge_chunks(role_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_role ON agent_sessions(role_id);
       CREATE INDEX IF NOT EXISTS idx_requirements_name ON requirements(name);
     `);
 
@@ -487,6 +518,32 @@ export class AgentForgeDB {
 
   deleteChunksForRole(roleId: string): void {
     this.sqlite.prepare(`DELETE FROM knowledge_chunks WHERE role_id = ?`).run(roleId);
+  }
+
+  // ── Agent Sessions ─────────────────────────────────────────────────────────
+
+  upsertAgentSession(session: AgentSession): void {
+    this.sqlite.prepare(`
+      INSERT INTO agent_sessions (provider, role_id, session_id, external_id, created_at, updated_at)
+      VALUES (@provider, @role_id, @session_id, @external_id, @created_at, @updated_at)
+      ON CONFLICT(provider, role_id, session_id) DO UPDATE SET
+        external_id = excluded.external_id,
+        updated_at = excluded.updated_at
+    `).run({
+      provider: session.provider,
+      role_id: session.roleId,
+      session_id: session.sessionId,
+      external_id: session.externalId,
+      created_at: session.createdAt,
+      updated_at: session.updatedAt,
+    });
+  }
+
+  getAgentSession(provider: string, roleId: string, sessionId: string): AgentSession | undefined {
+    const row = this.sqlite.prepare(
+      `SELECT * FROM agent_sessions WHERE provider = ? AND role_id = ? AND session_id = ?`
+    ).get(provider, roleId, sessionId) as Record<string, unknown> | undefined;
+    return row ? rowToAgentSession(row) : undefined;
   }
 
   // ── Requirements ───────────────────────────────────────────────────────────

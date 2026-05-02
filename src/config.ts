@@ -9,6 +9,11 @@ export interface AppConfig {
     apiKey: string;
     embeddingModel?: string;
   };
+  cursor?: {
+    apiKey: string;
+    model: string;
+    workspacePath: string;
+  };
   spawner: {
     mode: 'sdk' | 'cli';
     fallbackToCli: boolean;
@@ -35,6 +40,11 @@ export function getDefaultConfig(): AppConfig {
       provider: 'anthropic',
       model: 'claude-sonnet-4-6',
       apiKey: process.env.ANTHROPIC_API_KEY ?? '',
+    },
+    cursor: {
+      apiKey: process.env.CURSOR_API_KEY ?? '',
+      model: 'composer-2',
+      workspacePath: process.cwd(),
     },
     spawner: {
       mode: 'sdk',
@@ -64,6 +74,14 @@ function mergeConfig(base: AppConfig, partial: unknown): AppConfig {
     if (typeof llm.model === 'string') out.llm.model = llm.model;
     if (typeof llm.apiKey === 'string') out.llm.apiKey = llm.apiKey;
     if (typeof llm.embeddingModel === 'string') out.llm.embeddingModel = llm.embeddingModel;
+  }
+
+  if (isRecord(partial.cursor)) {
+    const cursor = partial.cursor;
+    out.cursor ??= { apiKey: process.env.CURSOR_API_KEY ?? '', model: 'composer-2', workspacePath: process.cwd() };
+    if (typeof cursor.apiKey === 'string') out.cursor.apiKey = cursor.apiKey;
+    if (typeof cursor.model === 'string') out.cursor.model = cursor.model;
+    if (typeof cursor.workspacePath === 'string') out.cursor.workspacePath = cursor.workspacePath;
   }
 
   if (isRecord(partial.spawner)) {

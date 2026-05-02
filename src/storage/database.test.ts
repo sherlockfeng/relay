@@ -216,3 +216,63 @@ describe('doc audit', () => {
     expect(db.getDocAudit('nope')).toBeUndefined();
   });
 });
+
+// ── Agent Sessions ────────────────────────────────────────────────────────────
+
+describe('agent sessions', () => {
+  let db: AgentForgeDB;
+  beforeEach(() => {
+    db = makeDB();
+    db.upsertRole({
+      id: 'goofy-expert',
+      name: 'Goofy 专家',
+      systemPrompt: 'You are Goofy.',
+      isBuiltin: false,
+      createdAt: '2025-01-01',
+    });
+  });
+
+  it('stores and retrieves an external agent session by provider, role, and session id', () => {
+    db.upsertAgentSession({
+      provider: 'cursor',
+      roleId: 'goofy-expert',
+      sessionId: 'chat-1',
+      externalId: 'cursor-agent-1',
+      createdAt: '2025-01-01',
+      updatedAt: '2025-01-01',
+    });
+
+    expect(db.getAgentSession('cursor', 'goofy-expert', 'chat-1')).toMatchObject({
+      provider: 'cursor',
+      roleId: 'goofy-expert',
+      sessionId: 'chat-1',
+      externalId: 'cursor-agent-1',
+    });
+  });
+
+  it('updates an existing external agent session without changing its identity', () => {
+    db.upsertAgentSession({
+      provider: 'cursor',
+      roleId: 'goofy-expert',
+      sessionId: 'chat-1',
+      externalId: 'cursor-agent-1',
+      createdAt: '2025-01-01',
+      updatedAt: '2025-01-01',
+    });
+
+    db.upsertAgentSession({
+      provider: 'cursor',
+      roleId: 'goofy-expert',
+      sessionId: 'chat-1',
+      externalId: 'cursor-agent-2',
+      createdAt: '2025-01-02',
+      updatedAt: '2025-01-02',
+    });
+
+    expect(db.getAgentSession('cursor', 'goofy-expert', 'chat-1')).toMatchObject({
+      externalId: 'cursor-agent-2',
+      createdAt: '2025-01-01',
+      updatedAt: '2025-01-02',
+    });
+  });
+});
